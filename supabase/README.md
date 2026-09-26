@@ -13,7 +13,7 @@
 | `migrations/20260101000002_02_functions_and_triggers.sql` | 22 функции и триггеры: автосоздание профиля (`handle_new_user`), `updated_at`, четверть по дате оценки, подсчёт посещаемости |
 | `migrations/20260101000003_03_rls_policies.sql` | 51 политика RLS: ученик видит только себя, оценку ставит учитель-предметник класса или админ |
 | `migrations/20260101000004_04_views.sql` | 5 представлений: `v_student_diary`, `v_student_subject_averages`, `v_class_roster`, `v_week_schedule`, `v_student_homework` |
-| `seed.sql` | демо-данные: школа, четверти 2025/2026, 11 предметов, класс 7А |
+| `seed.sql` | демо-данные: школа, 4 четверти 2025/2026, 15 предметов, класс 7А |
 | `promote_teacher.sql` | назначение роли `teacher` конкретному пользователю по e-mail |
 
 ## Способ 1 — одним файлом (быстро)
