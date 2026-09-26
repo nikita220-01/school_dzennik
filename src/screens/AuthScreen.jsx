@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { isValidEmail } from '../lib/authErrors'
+import { CLASSES, addStudent } from '../lib/schoolData'
 
 const ROLES = [
   { value: 'student', label: 'Ученик', emoji: '🎒' },
@@ -17,7 +18,8 @@ export default function AuthScreen() {
     email: '',
     password: '',
     passwordRepeat: '',
-    role: 'student'
+    role: 'student',
+    className: CLASSES[4]
   })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -57,13 +59,22 @@ export default function AuthScreen() {
     if (form.password !== form.passwordRepeat) {
       throw new Error('Пароли не совпадают')
     }
+    if (!form.className.trim()) {
+      throw new Error('Укажите класс, например 7А')
+    }
 
     const { needsEmailConfirm } = await signUp({
       email: form.email,
       password: form.password,
       fullName: form.fullName,
-      role: form.role
+      role: form.role,
+      className: form.className
     })
+
+    // Ученик сразу попадает в список класса, чтобы учитель мог ставить ему отметки
+    if (form.role === 'student') {
+      addStudent(form.className.trim(), form.fullName.trim())
+    }
 
     if (needsEmailConfirm) {
       setNotice(
@@ -213,6 +224,28 @@ export default function AuthScreen() {
                   ))}
                 </div>
               </fieldset>
+
+              <label className="field">
+                <span className="field__label">
+                  {form.role === 'teacher' ? 'Какой класс вы ведёте?' : 'Класс'}
+                </span>
+                <input
+                  className="field__input"
+                  list="classes-list"
+                  placeholder="Например 7А"
+                  value={form.className}
+                  onChange={update('className')}
+                  disabled={busy}
+                />
+                <datalist id="classes-list">
+                  {CLASSES.map((item) => (
+                    <option key={item} value={item} />
+                  ))}
+                </datalist>
+                <span className="field__note">
+                  Учитель ставит отметки только в выбранном классе.
+                </span>
+              </label>
             </>
           )}
 

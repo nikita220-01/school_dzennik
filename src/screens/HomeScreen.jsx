@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
+import GradesScreen from './GradesScreen'
 
 const ROLE_LABELS = {
   admin: 'Администратор',
@@ -16,7 +17,8 @@ const SECTIONS = [
 ]
 
 export default function HomeScreen() {
-  const { displayName, user, profile, role, profileError, signOut } = useAuth()
+  const { displayName, user, profile, role, className, profileError, signOut } = useAuth()
+  const [tab, setTab] = useState('diary') // 'diary' | 'grades'
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
@@ -40,6 +42,7 @@ export default function HomeScreen() {
           <h1 className="home__name">{displayName || 'пользователь'}</h1>
           <p className="home__meta">
             <span className="badge badge--role">{ROLE_LABELS[role] || 'Роль не задана'}</span>
+            {className ? <span className="badge">{className} класс</span> : null}
             <span className="home__email">{user?.email}</span>
           </p>
         </div>
@@ -62,7 +65,32 @@ export default function HomeScreen() {
         </div>
       ) : null}
 
-      <section className="cards">
+      <nav className="tabs tabs--screens" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'diary'}
+          className={`tabs__item ${tab === 'diary' ? 'is-active' : ''}`}
+          onClick={() => setTab('diary')}
+        >
+          📔 Дневник
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'grades'}
+          className={`tabs__item ${tab === 'grades' ? 'is-active' : ''}`}
+          onClick={() => setTab('grades')}
+        >
+          📝 Отметки
+        </button>
+      </nav>
+
+      {tab === 'grades' ? (
+        <GradesScreen />
+      ) : (
+        <>
+          <section className="cards">
         {SECTIONS.map((section) => (
           <article className="card" key={section.title}>
             <span className="card__emoji" aria-hidden="true">
@@ -100,6 +128,8 @@ export default function HomeScreen() {
           </div>
         </dl>
       </section>
+        </>
+      )}
     </div>
   )
 }

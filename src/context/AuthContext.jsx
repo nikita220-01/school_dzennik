@@ -16,6 +16,7 @@ function profileFromMetadata(user) {
     email: user.email,
     full_name: meta.full_name || null,
     role: meta.role || 'student',
+    class_name: meta.class_name || null,
     school_id: null,
     is_active: true,
     __source: 'auth'
@@ -105,14 +106,15 @@ export function AuthProvider({ children }) {
     if (error) throw new Error(translateAuthError(error))
   }, [])
 
-  const signUp = useCallback(async ({ email, password, fullName, role }) => {
+  const signUp = useCallback(async ({ email, password, fullName, role, className }) => {
     const { data, error } = await supabase.auth.signUp({
       email: email.trim(),
       password,
       options: {
         data: {
           full_name: fullName.trim(),
-          role
+          role,
+          class_name: (className || '').trim() || null
         }
       }
     })
@@ -142,6 +144,7 @@ export function AuthProvider({ children }) {
       profile,
       profileError,
       role: profile?.role || user?.user_metadata?.role || null,
+      className: profile?.class_name || user?.user_metadata?.class_name || null,
       displayName,
       signIn,
       signUp,
