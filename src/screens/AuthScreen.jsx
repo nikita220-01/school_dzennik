@@ -4,7 +4,8 @@ import { isValidEmail } from '../lib/authErrors'
 
 const ROLES = [
   { value: 'student', label: 'Ученик', emoji: '🎒' },
-  { value: 'parent', label: 'Родитель', emoji: '👪' }
+  { value: 'parent', label: 'Родитель', emoji: '👪' },
+  { value: 'teacher', label: 'Учитель', emoji: '👩‍🏫' }
 ]
 
 export default function AuthScreen() {
@@ -105,7 +106,7 @@ export default function AuthScreen() {
             <p className="auth__subtitle">
               {mode === 'login'
                 ? 'Войдите, чтобы увидеть дневник'
-                : 'Создайте аккаунт ученика или родителя'}
+                : 'Создайте аккаунт ученика, родителя или учителя'}
             </p>
           </div>
         </header>
