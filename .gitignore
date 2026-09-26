@@ -1,0 +1,22 @@
+# Секреты — НИКОГДА не коммитим
+.env
+.env.local
+.env.*.local
+
+# Зависимости и сборки
+node_modules/
+dist/
+build/
+.vite/
+.next/
+out/
+
+# Логи и служебные файлы
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# Supabase CLI
+supabase/.temp/
+supabase/.branches/
