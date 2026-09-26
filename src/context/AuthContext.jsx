@@ -7,6 +7,31 @@ const MIN_BOOT_MS = 1400
 
 const AuthContext = createContext(null)
 
+/**
+ * Приводим роль к нижнему регистру и понимаем русские/заглавные варианты:
+ * «Учитель», «Teacher», «TEACHER» → 'teacher'. В базе и в коде роль — строчными.
+ */
+const ROLE_ALIASES = {
+  teacher: 'teacher',
+  учитель: 'teacher',
+  admin: 'admin',
+  administrator: 'admin',
+  админ: 'admin',
+  администратор: 'admin',
+  student: 'student',
+  ученик: 'student',
+  ученица: 'student',
+  parent: 'parent',
+  родитель: 'parent'
+}
+
+export function normalizeRole(raw) {
+  if (raw === null || raw === undefined) return null
+  const key = String(raw).trim().toLowerCase()
+  if (!key) return null
+  return ROLE_ALIASES[key] || key
+}
+
 /** Данные пользователя из метаданных auth — запасной вариант, если таблицы profiles ещё нет */
 function profileFromMetadata(user) {
   if (!user) return null
@@ -15,7 +40,7 @@ function profileFromMetadata(user) {
     id: user.id,
     email: user.email,
     full_name: meta.full_name || null,
-    role: meta.role || 'student',
+    role: normalizeRole(meta.role) || 'student',
     class_name: meta.class_name || null,
     school_id: null,
     is_active: true,
@@ -136,6 +161,17 @@ export function AuthProvider({ children }) {
       user?.user_metadata?.full_name ||
       (user?.email ? user.email.split('@')[0] : null)
 
+    const profileRole = normalizeRole(profile?.role)
+    const metaRole = normalizeRole(user?.user_metadata?.role)
+    // Старшинство ролей: admin > teacher > то, что вернула база.
+    // Триггер БД создаёт профиль со 'student', поэтому заявку «teacher» не теряем.
+    const role =
+      profileRole === 'admin' || metaRole === 'admin'
+        ? 'admin'
+        : profileRole === 'teacher' || metaRole === 'teacher'
+          ? 'teacher'
+          : profileRole || metaRole || null
+
     return {
       booting,
       bootError,
@@ -143,7 +179,7 @@ export function AuthProvider({ children }) {
       user,
       profile,
       profileError,
-      role: profile?.role || user?.user_metadata?.role || null,
+      role,
       className: profile?.class_name || user?.user_metadata?.class_name || null,
       displayName,
       signIn,
