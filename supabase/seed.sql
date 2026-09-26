@@ -50,9 +50,18 @@ cross join (values
 on conflict (school_id, name) do nothing;
 
 -- -----------------------------------------------------------------------------
---  4. Класс 7А
+--  4. Классы: 3А…11Г (9 параллелей × 4 буквы = 36 классов)
+--     Код приглашения — латиницей: А→A, Б→B, В→V, Г→G (например 7A2025, 11G2025).
 -- -----------------------------------------------------------------------------
 insert into public.classes (school_id, name, grade_level, academic_year, room, invite_code)
-select sc.id, '7А', 7, '2025/2026', '201', '7A2025'
-from (select id from public.schools order by created_at limit 1) sc
+select sc.id,
+       v.grade::text || l.letter,
+       v.grade::smallint,
+       '2025/2026',
+       case when v.grade = 7 and l.letter = 'А' then '201' else null end,
+       v.grade::text || l.latin || '2025'
+  from (select id from public.schools order by created_at limit 1) sc
+ cross join generate_series(3, 11) as v (grade)
+ cross join (values ('А', 'A'), ('Б', 'B'), ('В', 'V'), ('Г', 'G')) as l (letter, latin)
 on conflict (school_id, name, academic_year) do nothing;
+

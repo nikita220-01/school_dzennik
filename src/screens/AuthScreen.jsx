@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { isValidEmail } from '../lib/authErrors'
-import { CLASSES, addStudent } from '../lib/schoolData'
 
 const ROLES = [
   { value: 'student', label: 'Ученик', emoji: '🎒' },
@@ -19,7 +18,8 @@ export default function AuthScreen() {
     password: '',
     passwordRepeat: '',
     role: 'student',
-    className: CLASSES[4]
+    /** Код класса для ученика (invite_code из таблицы classes, например 7A2025) */
+    classCode: ''
   })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -59,29 +59,35 @@ export default function AuthScreen() {
     if (form.password !== form.passwordRepeat) {
       throw new Error('Пароли не совпадают')
     }
-    if (!form.className.trim()) {
-      throw new Error('Укажите класс, например 7А')
+    if (form.role === 'student' && /\s/.test(form.classCode.trim())) {
+      throw new Error('В коде класса не должно быть пробелов, например 7A2025')
     }
 
-    const { needsEmailConfirm } = await signUp({
+    const { needsEmailConfirm, joinError } = await signUp({
       email: form.email,
       password: form.password,
       fullName: form.fullName,
       role: form.role,
-      className: form.className
+      classCode: form.classCode
     })
 
-    // Ученик сразу попадает в список класса, чтобы учитель мог ставить ему отметки
-    if (form.role === 'student') {
-      addStudent(form.className.trim(), form.fullName.trim())
-    }
-
     if (needsEmailConfirm) {
+      const code = form.classCode.trim()
       setNotice(
-        `Аккаунт создан. Мы отправили письмо на ${form.email.trim()} — перейдите по ссылке в письме, затем войдите.`
+        form.role === 'student' && code
+          ? `Аккаунт создан. Мы отправили письмо на ${form.email.trim()} — перейдите по ссылке в письме и войдите. ` +
+            `Код класса (${code.toUpperCase()}) введите ещё раз на главной странице, в блоке «Присоединиться к классу».`
+          : `Аккаунт создан. Мы отправили письмо на ${form.email.trim()} — перейдите по ссылке в письме, затем войдите.`
       )
       setMode('login')
       setForm((prev) => ({ ...prev, password: '', passwordRepeat: '' }))
+      return
+    }
+
+    // Аккаунт создан и вход выполнен, но код класса не подошёл —
+    // присоединиться можно будет из дневника.
+    if (joinError) {
+      setNotice(`Аккаунт создан. В класс добавить не удалось: ${joinError}`)
     }
   }
 
@@ -225,27 +231,36 @@ export default function AuthScreen() {
                 </div>
               </fieldset>
 
-              <label className="field">
-                <span className="field__label">
-                  {form.role === 'teacher' ? 'Какой класс вы ведёте?' : 'Класс'}
-                </span>
-                <input
-                  className="field__input"
-                  list="classes-list"
-                  placeholder="Например 7А"
-                  value={form.className}
-                  onChange={update('className')}
-                  disabled={busy}
-                />
-                <datalist id="classes-list">
-                  {CLASSES.map((item) => (
-                    <option key={item} value={item} />
-                  ))}
-                </datalist>
-                <span className="field__note">
-                  Учитель ставит отметки только в выбранном классе.
-                </span>
-              </label>
+              {form.role === 'student' ? (
+                <label className="field">
+                  <span className="field__label">Код класса</span>
+                  <input
+                    className="field__input"
+                    type="text"
+                    placeholder="Например 7A2025"
+                    value={form.classCode}
+                    onChange={update('classCode')}
+                    disabled={busy}
+                  />
+                  <span className="field__note">
+                    Код выдаёт классный руководитель — он виден учителю в разделе «Отметки».
+                    Можно ввести позже: в дневнике появится кнопка «Присоединиться к классу».
+                  </span>
+                </label>
+              ) : null}
+
+              {form.role === 'teacher' ? (
+                <p className="field__note">
+                  Классы и предметы учитель выбирает в разделе «Отметки». Роль «учитель» в базе
+                  выдаёт администратор школы (файл supabase/promote_teacher.sql).
+                </p>
+              ) : null}
+
+              {form.role === 'parent' ? (
+                <p className="field__note">
+                  Ребёнка родитель привязывает по номеру карты — эта возможность появится позже.
+                </p>
+              ) : null}
             </>
           )}
 

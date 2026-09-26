@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { translateAuthError } from '../lib/authErrors'
+import { joinClass as joinClassByCode, loadMyStudent } from '../lib/schoolData'
 
 /** Минимальное время показа загрузочного экрана, чтобы он не «мигал» */
 const MIN_BOOT_MS = 1400
@@ -54,6 +55,9 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
   const [profileError, setProfileError] = useState(null)
+  /** Карточка ученика из базы: { studentId, classId, className, cardNumber } */
+  const [enrollment, setEnrollment] = useState(null)
+  const [enrollmentError, setEnrollmentError] = useState(null)
 
   const loadProfile = useCallback(async (user) => {
     if (!user) {
@@ -80,6 +84,27 @@ export function AuthProvider({ children }) {
     setProfileError(null)
   }, [])
 
+  /**
+   * Класс ученика берём из таблицы students (через RPC join_class его заполняет
+   * ученик по коду). У учителя и админа карточки ученика нет — enrollment = null.
+   */
+  const loadEnrollment = useCallback(async (userId) => {
+    if (!userId) {
+      setEnrollment(null)
+      setEnrollmentError(null)
+      return
+    }
+
+    try {
+      const row = await loadMyStudent(userId)
+      setEnrollment(row)
+      setEnrollmentError(null)
+    } catch (error) {
+      setEnrollment(null)
+      setEnrollmentError(error.message)
+    }
+  }, [])
+
   useEffect(() => {
     let alive = true
     const startedAt = Date.now()
@@ -93,7 +118,10 @@ export function AuthProvider({ children }) {
         if (!alive) return
 
         setSession(current)
-        if (current?.user) await loadProfile(current.user)
+        if (current?.user) {
+          await loadProfile(current.user)
+          await loadEnrollment(current.user.id)
+        }
       } catch (error) {
         if (alive) setBootError(translateAuthError(error))
       } finally {
@@ -111,9 +139,12 @@ export function AuthProvider({ children }) {
       setSession(nextSession)
       if (nextSession?.user) {
         loadProfile(nextSession.user)
+        loadEnrollment(nextSession.user.id)
       } else {
         setProfile(null)
         setProfileError(null)
+        setEnrollment(null)
+        setEnrollmentError(null)
       }
     })
 
@@ -121,7 +152,7 @@ export function AuthProvider({ children }) {
       alive = false
       listener.subscription.unsubscribe()
     }
-  }, [loadProfile])
+  }, [loadProfile, loadEnrollment])
 
   const signIn = useCallback(async (email, password) => {
     const { error } = await supabase.auth.signInWithPassword({
@@ -131,23 +162,60 @@ export function AuthProvider({ children }) {
     if (error) throw new Error(translateAuthError(error))
   }, [])
 
-  const signUp = useCallback(async ({ email, password, fullName, role, className }) => {
-    const { data, error } = await supabase.auth.signUp({
-      email: email.trim(),
-      password,
-      options: {
-        data: {
-          full_name: fullName.trim(),
-          role,
-          class_name: (className || '').trim() || null
+  const signUp = useCallback(
+    async ({ email, password, fullName, role, classCode }) => {
+      const trimmedCode = (classCode || '').trim()
+
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          data: {
+            full_name: fullName.trim(),
+            role,
+            // Код класса нужен, чтобы ученик сразу попал в список класса
+            invite_code: trimmedCode || null
+          }
+        }
+      })
+      if (error) throw new Error(translateAuthError(error))
+
+      // Если в Supabase включено подтверждение email, сессии сразу не будет.
+      const needsEmailConfirm = !data.session
+
+      // Ученика сразу записываем в класс (RPC join_class), чтобы он появился
+      // в списке учителя на любом устройстве. Ошибку не «валим» на регистрацию:
+      // код можно ввести позже в дневнике.
+      if (data.session?.user && role === 'student' && trimmedCode) {
+        try {
+          await joinClassByCode(trimmedCode)
+          await loadEnrollment(data.session.user.id)
+        } catch (joinError) {
+          return { needsEmailConfirm, joinError: joinError.message }
         }
       }
-    })
-    if (error) throw new Error(translateAuthError(error))
 
-    // Если в Supabase включено подтверждение email, сессии сразу не будет.
-    return { needsEmailConfirm: !data.session }
-  }, [])
+      return { needsEmailConfirm }
+    },
+    [loadEnrollment]
+  )
+
+  /** Ученик присоединяется к классу по коду (например 7A2025) или меняет класс */
+  const joinClass = useCallback(
+    async (code) => {
+      const classId = await joinClassByCode(code)
+      const { data } = await supabase.auth.getUser()
+      await loadEnrollment(data?.user?.id)
+      return classId
+    },
+    [loadEnrollment]
+  )
+
+  /** Перечитать карточку ученика (класс и номер карты) из базы */
+  const refreshEnrollment = useCallback(async () => {
+    const { data } = await supabase.auth.getUser()
+    await loadEnrollment(data?.user?.id)
+  }, [loadEnrollment])
 
   const signOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut()
@@ -179,14 +247,36 @@ export function AuthProvider({ children }) {
       user,
       profile,
       profileError,
+      profileRole,
+      metaRole,
       role,
-      className: profile?.class_name || user?.user_metadata?.class_name || null,
+      /** Класс ученика из базы: { studentId, classId, className, cardNumber } */
+      enrollment,
+      enrollmentError,
+      studentId: enrollment?.studentId || null,
+      classId: enrollment?.classId || null,
+      className: enrollment?.className || null,
       displayName,
       signIn,
       signUp,
-      signOut
+      signOut,
+      joinClass,
+      refreshEnrollment
     }
-  }, [booting, bootError, session, profile, profileError, signIn, signUp, signOut])
+  }, [
+    booting,
+    bootError,
+    session,
+    profile,
+    profileError,
+    enrollment,
+    enrollmentError,
+    signIn,
+    signUp,
+    signOut,
+    joinClass,
+    refreshEnrollment
+  ])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

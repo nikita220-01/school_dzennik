@@ -15,9 +15,17 @@
 --    • если таких нет — самый новый зарегистрированный аккаунт.
 --  Если профиля у пользователя ещё нет, он создаётся (INSERT не защищён триггером).
 --
+--  ШАГ 4 ДОПОЛНИТЕЛЬНО ВЫДАЁТ ДОСТУП К КЛАССАМ:
+--    учитель по правилам RLS видит класс и ставит отметки только там, где он
+--    назначен в public.class_subjects (или где он классный руководитель).
+--    Поэтому в шаге 4 каждый «учитель» получает все предметы всех 36 классов —
+--    этого достаточно, чтобы проверить любую параллель (3А…11Г).
+--    Нужен только один класс — добавьте в WHERE шага 4 условие c.name = '7А'.
+--    Нужен администратор (видит всё без назначений)? Замените 'teacher' на 'admin'
+--    в двух местах блока «Шаг 2» и в «Шаге 3»; шаг 4 можно не выполнять.
+--
 --  КАК ЗАПУСКАТЬ: Supabase → SQL Editor → New query → вставить файл целиком → Run.
---  Файл идемпотентный: повторный запуск безопасен. Нужен админ? Замените
---  'teacher' на 'admin' в двух местах блока «Шаг 2».
+--  Файл идемпотентный: повторный запуск безопасен.
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -100,12 +108,29 @@ update auth.users u
 returning u.email, u.raw_user_meta_data ->> 'role' as meta_role;
 
 -- -----------------------------------------------------------------------------
---  Шаг 4. Проверка: ожидаем profile_role = teacher и meta_role = teacher
+--  Шаг 4. Выдать учителю доступ к классам (таблица class_subjects)
+--  Без этих строк учитель не увидит список учеников: RLS пускает его только в те
+--  классы, где он назначен на предмет (или где он классный руководитель).
+--  Нужен доступ только к одному классу? Добавьте в WHERE: and c.name = '7А'
+--  Только один предмет? Добавьте: and s.name = 'Алгебра'
+-- -----------------------------------------------------------------------------
+insert into public.class_subjects (class_id, subject_id, teacher_id)
+select c.id, s.id, p.id
+  from public.profiles p
+ cross join public.classes c
+ cross join public.subjects s
+ where p.role = 'teacher'
+on conflict (class_id, subject_id) do update
+  set teacher_id = excluded.teacher_id;
+
+-- -----------------------------------------------------------------------------
+--  Шаг 5. Проверка: ожидаем profile_role = teacher и meta_role = teacher
 -- -----------------------------------------------------------------------------
 select u.email,
        coalesce(p.role::text, '—') as profile_role,
        coalesce(u.raw_user_meta_data ->> 'role', '—') as meta_role,
-       coalesce(p.full_name, '—') as full_name
+       coalesce(p.full_name, '—') as full_name,
+       (select count(*) from public.class_subjects cs where cs.teacher_id = u.id) as class_assignments
   from auth.users u
   left join public.profiles p on p.id = u.id
  order by u.created_at;
@@ -116,6 +141,16 @@ select u.email,
 -- Назначить администратора: в блоке «Шаг 2» замените 'teacher' на 'admin'
 --   (две замены: в INSERT и в UPDATE) и в «Шаге 3» тоже.
 -- Вернуть аккаунт в ученики: тот же блок со значением 'student'.
+-- Снять учителя со всех классов (например, перед выдачей нового списка):
+--   delete from public.class_subjects
+--    where teacher_id = (select id from auth.users where email = 'кто-то@example.com');
+-- Посмотреть, кто какой класс ведёт:
+--   select p.full_name, c.name, s.name
+--     from public.class_subjects cs
+--     join public.profiles p on p.id = cs.teacher_id
+--     join public.classes  c on c.id = cs.class_id
+--     join public.subjects s on s.id = cs.subject_id
+--    order by p.full_name, c.name, s.name;
 -- Эквивалент вручную, если нужен один конкретный аккаунт:
 --   alter table public.profiles disable trigger trg_profiles_protect_fields;
 --   update public.profiles set role = 'teacher', updated_at = now()

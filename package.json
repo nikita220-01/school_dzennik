@@ -8,7 +8,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "check:auth": "node scripts/check-auth.mjs"
+    "check:auth": "node scripts/check-auth.mjs",
+    "check:sql": "node scripts/check-sql.mjs",
+    "build:sql": "node scripts/build-apply-all.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.58.0",

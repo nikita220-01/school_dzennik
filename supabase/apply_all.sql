@@ -1,31 +1,30 @@
 -- =============================================================================
 --  ШКОЛЬНЫЙ ДНЕВНИК — ЗАПУСТИТЬ ВСЁ ОДНИМ ФАЙЛОМ
 --
---  Этот файл склеен из 6 частей (создан автоматически, порядок важен):
---    1) migrations/20260101000000_00_extensions_and_types.sql   — расширения и ENUM
---    2) migrations/20260101000001_01_core_tables.sql            — 15 таблиц и индексы
+--  Этот файл склеен из 8 частей (создан автоматически, порядок важен):
+--    1) migrations/20260101000000_00_extensions_and_types.sql — расширения и ENUM
+--    2) migrations/20260101000001_01_core_tables.sql — 15 таблиц и индексы
 --    3) migrations/20260101000002_02_functions_and_triggers.sql — функции и триггеры
---    4) migrations/20260101000003_03_rls_policies.sql           — права доступа (RLS)
---    5) migrations/20260101000004_04_views.sql                  — 5 представлений (VIEW)
---    6) seed.sql                                                — демо-данные: школа, 4 четверти, 15 предметов, класс 7А
---    7) promote_teacher.sql                                     — назначение роли «учитель» тем, кто регистрировался
---                                                                 учителем (или самому новому аккаунту); пока
---                                                                 пользователей нет — просто пишет NOTICE)
+--    4) migrations/20260101000003_03_rls_policies.sql — права доступа (RLS)
+--    5) migrations/20260101000004_04_views.sql — 5 представлений (VIEW)
+--    6) migrations/20260101000005_05_classes_and_grades_scale.sql — классы 3А…11Г (36 классов) и 10-балльная шкала оценок
+--    7) seed.sql — демо-данные: школа, 4 четверти, 15 предметов, все классы 3А…11Г
+--    8) promote_teacher.sql — роль «учитель» тем, кто регистрировался учителем (или самому новому аккаунту)
+--                                                                  и назначение ему классов; пока пользователей нет — пишет NOTICE
 --
 --  КАК ЗАПУСКАТЬ
 --    1. Supabase → ваш проект → SQL Editor → New query.
 --    2. Откройте этот файл, выделите всё (Ctrl+A), скопируйте (Ctrl+C) и вставьте в редактор.
 --    3. Нажмите Run (Ctrl+Enter). Ожидаемый результат: «Success. No rows returned».
 --    4. Проверка в новом запросе:
---         select table_name from information_schema.tables where table_schema = 'public' order by 1;
---         select count(*) from public.subjects;   -- предметы
---         select name from public.classes;        -- 7А
+--         select count(*) from public.subjects;   -- 15 предметов
+--         select count(*) from public.classes;    -- 36 классов (3А…11Г)
+--         select name, invite_code from public.classes order by grade_level, name;
 --
 --  ФАЙЛ ИДЕМПОТЕНТНЫЙ: повторный запуск безопасен (if not exists / create or replace /
 --  drop ... if exists), поэтому его можно прогнать ещё раз, если проект «поехал».
 --  Хотите по шагам и с остановками — запускайте исходные файлы по одному из папки supabase/migrations.
 -- =============================================================================
-
 -- >>>>>>>>>>>>>>>>>>>>>> НАЧАЛО: supabase\migrations\20260101000000_00_extensions_and_types.sql >>>>>>>>>>>>>>>>>>>>>>
 
 -- =============================================================================
@@ -1700,6 +1699,81 @@ from anon;
 
 -- <<<<<<<<<<<<<<<<<<<<<< КОНЕЦ: supabase\migrations\20260101000004_04_views.sql <<<<<<<<<<<<<<<<<<<<<<
 
+-- >>>>>>>>>>>>>>>>>>>>>> НАЧАЛО: supabase\migrations\20260101000005_05_classes_and_grades_scale.sql >>>>>>>>>>>>>>>>>>>>>>
+
+-- =============================================================================
+--  Школьный дневник — шаг 05. Все классы (3А…11Г) и 10-балльная шкала оценок
+--
+--  ЧТО ДЕЛАЕТ
+--    1) Переводит оценки на 10-балльную шкалу (1…10) вместо 5-балльной:
+--       пересоздаёт ограничение grades_value_check.
+--    2) Добавляет уникальный ключ (ученик + предмет + дата + вид оценки) —
+--       приложение сохраняет отметку через upsert ... on conflict, без дублей.
+--    3) Создаёт все классы школы: 3А…11Г (9 параллелей × 4 буквы = 36 классов)
+--       с кодами приглашения вида 3A2025, 7Б → 7B2025, 11Г → 11G2025.
+--       Уже существующий класс 7А сохраняет свой код 7A2025.
+--
+--  КАК ЗАПУСКАТЬ: Supabase → SQL Editor → New query → вставить файл целиком → Run.
+--  Файл идемпотентный: повторный запуск безопасен.
+--
+--  ПРО ШКАЛУ: значения 1…5 из старой шкалы остаются допустимыми, поэтому уже
+--  выставленные отметки не ломаются. Коды приглашения — латиницей (А→A, Б→B,
+--  В→V, Г→G): их проще набрать с телефона.
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+--  1. 10-балльная шкала: 1…10
+-- -----------------------------------------------------------------------------
+alter table public.grades drop constraint if exists grades_value_check;
+alter table public.grades add  constraint grades_value_check check (value between 1 and 10);
+
+comment on table public.grades is
+  'Оценки по 10-балльной шкале (1…10); weight нужен для взвешенного среднего';
+
+-- -----------------------------------------------------------------------------
+--  2. Ключ для сохранения отметки из приложения
+--     Одна отметка на «ученик + предмет + дата + вид»: повторное сохранение
+--     клетки дневника обновляет ту же строку, а не создаёт дубль.
+-- -----------------------------------------------------------------------------
+create unique index if not exists uq_grades_student_subject_date_kind
+  on public.grades (student_id, subject_id, grade_date, kind);
+
+comment on index public.uq_grades_student_subject_date_kind is
+  'Уникальность отметки в клетке дневника: ученик + предмет + дата + вид';
+
+-- -----------------------------------------------------------------------------
+--  3. Все классы: 3А…11Г
+-- -----------------------------------------------------------------------------
+insert into public.classes (school_id, name, grade_level, academic_year, room, invite_code)
+select sc.id,
+       v.grade::text || l.letter,
+       v.grade::smallint,
+       '2025/2026',
+       null,
+       v.grade::text || l.latin || '2025'
+  from (select id from public.schools order by created_at limit 1) sc
+ cross join generate_series(3, 11) as v (grade)
+ cross join (values ('А', 'A'), ('Б', 'B'), ('В', 'V'), ('Г', 'G')) as l (letter, latin)
+on conflict (school_id, name, academic_year) do nothing;
+
+-- -----------------------------------------------------------------------------
+--  4. Проверка (ожидаем 36 строк: 3А … 11Г)
+-- -----------------------------------------------------------------------------
+select count(*) as classes_total from public.classes;
+
+select name, grade_level, invite_code
+  from public.classes
+ order by grade_level, name;
+
+-- Полезное на будущее: если классы были созданы раньше со случайными кодами и
+-- нужно привести их к каноничному виду («7Б» → «7B2025»), раскомментируйте:
+-- update public.classes c
+--    set invite_code = c.grade_level::text || v.latin || '2025'
+--   from (values ('А','A'), ('Б','B'), ('В','V'), ('Г','G')) as v (letter, latin)
+--  where c.name = c.grade_level::text || v.letter;
+
+-- <<<<<<<<<<<<<<<<<<<<<< КОНЕЦ: supabase\migrations\20260101000005_05_classes_and_grades_scale.sql <<<<<<<<<<<<<<<<<<<<<<
+
 -- >>>>>>>>>>>>>>>>>>>>>> НАЧАЛО: supabase\seed.sql >>>>>>>>>>>>>>>>>>>>>>
 
 -- =============================================================================
@@ -1754,11 +1828,19 @@ cross join (values
 on conflict (school_id, name) do nothing;
 
 -- -----------------------------------------------------------------------------
---  4. Класс 7А
+--  4. Классы: 3А…11Г (9 параллелей × 4 буквы = 36 классов)
+--     Код приглашения — латиницей: А→A, Б→B, В→V, Г→G (например 7A2025, 11G2025).
 -- -----------------------------------------------------------------------------
 insert into public.classes (school_id, name, grade_level, academic_year, room, invite_code)
-select sc.id, '7А', 7, '2025/2026', '201', '7A2025'
-from (select id from public.schools order by created_at limit 1) sc
+select sc.id,
+       v.grade::text || l.letter,
+       v.grade::smallint,
+       '2025/2026',
+       case when v.grade = 7 and l.letter = 'А' then '201' else null end,
+       v.grade::text || l.latin || '2025'
+  from (select id from public.schools order by created_at limit 1) sc
+ cross join generate_series(3, 11) as v (grade)
+ cross join (values ('А', 'A'), ('Б', 'B'), ('В', 'V'), ('Г', 'G')) as l (letter, latin)
 on conflict (school_id, name, academic_year) do nothing;
 
 -- <<<<<<<<<<<<<<<<<<<<<< КОНЕЦ: supabase\seed.sql <<<<<<<<<<<<<<<<<<<<<<
@@ -1781,9 +1863,17 @@ on conflict (school_id, name, academic_year) do nothing;
 --    • если таких нет — самый новый зарегистрированный аккаунт.
 --  Если профиля у пользователя ещё нет, он создаётся (INSERT не защищён триггером).
 --
+--  ШАГ 4 ДОПОЛНИТЕЛЬНО ВЫДАЁТ ДОСТУП К КЛАССАМ:
+--    учитель по правилам RLS видит класс и ставит отметки только там, где он
+--    назначен в public.class_subjects (или где он классный руководитель).
+--    Поэтому в шаге 4 каждый «учитель» получает все предметы всех 36 классов —
+--    этого достаточно, чтобы проверить любую параллель (3А…11Г).
+--    Нужен только один класс — добавьте в WHERE шага 4 условие c.name = '7А'.
+--    Нужен администратор (видит всё без назначений)? Замените 'teacher' на 'admin'
+--    в двух местах блока «Шаг 2» и в «Шаге 3»; шаг 4 можно не выполнять.
+--
 --  КАК ЗАПУСКАТЬ: Supabase → SQL Editor → New query → вставить файл целиком → Run.
---  Файл идемпотентный: повторный запуск безопасен. Нужен админ? Замените
---  'teacher' на 'admin' в двух местах блока «Шаг 2».
+--  Файл идемпотентный: повторный запуск безопасен.
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -1866,12 +1956,29 @@ update auth.users u
 returning u.email, u.raw_user_meta_data ->> 'role' as meta_role;
 
 -- -----------------------------------------------------------------------------
---  Шаг 4. Проверка: ожидаем profile_role = teacher и meta_role = teacher
+--  Шаг 4. Выдать учителю доступ к классам (таблица class_subjects)
+--  Без этих строк учитель не увидит список учеников: RLS пускает его только в те
+--  классы, где он назначен на предмет (или где он классный руководитель).
+--  Нужен доступ только к одному классу? Добавьте в WHERE: and c.name = '7А'
+--  Только один предмет? Добавьте: and s.name = 'Алгебра'
+-- -----------------------------------------------------------------------------
+insert into public.class_subjects (class_id, subject_id, teacher_id)
+select c.id, s.id, p.id
+  from public.profiles p
+ cross join public.classes c
+ cross join public.subjects s
+ where p.role = 'teacher'
+on conflict (class_id, subject_id) do update
+  set teacher_id = excluded.teacher_id;
+
+-- -----------------------------------------------------------------------------
+--  Шаг 5. Проверка: ожидаем profile_role = teacher и meta_role = teacher
 -- -----------------------------------------------------------------------------
 select u.email,
        coalesce(p.role::text, '—') as profile_role,
        coalesce(u.raw_user_meta_data ->> 'role', '—') as meta_role,
-       coalesce(p.full_name, '—') as full_name
+       coalesce(p.full_name, '—') as full_name,
+       (select count(*) from public.class_subjects cs where cs.teacher_id = u.id) as class_assignments
   from auth.users u
   left join public.profiles p on p.id = u.id
  order by u.created_at;
@@ -1882,6 +1989,16 @@ select u.email,
 -- Назначить администратора: в блоке «Шаг 2» замените 'teacher' на 'admin'
 --   (две замены: в INSERT и в UPDATE) и в «Шаге 3» тоже.
 -- Вернуть аккаунт в ученики: тот же блок со значением 'student'.
+-- Снять учителя со всех классов (например, перед выдачей нового списка):
+--   delete from public.class_subjects
+--    where teacher_id = (select id from auth.users where email = 'кто-то@example.com');
+-- Посмотреть, кто какой класс ведёт:
+--   select p.full_name, c.name, s.name
+--     from public.class_subjects cs
+--     join public.profiles p on p.id = cs.teacher_id
+--     join public.classes  c on c.id = cs.class_id
+--     join public.subjects s on s.id = cs.subject_id
+--    order by p.full_name, c.name, s.name;
 -- Эквивалент вручную, если нужен один конкретный аккаунт:
 --   alter table public.profiles disable trigger trg_profiles_protect_fields;
 --   update public.profiles set role = 'teacher', updated_at = now()
@@ -1889,4 +2006,5 @@ select u.email,
 --   alter table public.profiles enable  trigger trg_profiles_protect_fields;
 -- ВАЖНО: обновлять role через Table Editor не получится — триггер сработает
 -- и там (у запросов панели тоже нет JWT). Только SQL Editor.
+
 -- <<<<<<<<<<<<<<<<<<<<<< КОНЕЦ: supabase\promote_teacher.sql <<<<<<<<<<<<<<<<<<<<<<

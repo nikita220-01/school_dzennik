@@ -16,8 +16,99 @@ const SECTIONS = [
   { title: 'Посещаемость', emoji: '✅', hint: 'Пропуски и причины' }
 ]
 
+/**
+ * Блок «Присоединиться к классу».
+ * Класс хранится в базе (таблица students), а привязка идёт по коду приглашения
+ * из таблицы classes — тот же код выдаёт учитель в разделе «Отметки».
+ */
+function JoinClassPanel({ currentClassName }) {
+  const { joinClass } = useAuth()
+  const [code, setCode] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const [done, setDone] = useState(null)
+
+  const onSubmit = async (event) => {
+    event.preventDefault()
+    if (busy) return
+
+    setBusy(true)
+    setError(null)
+    setDone(null)
+
+    try {
+      await joinClass(code)
+      setCode('')
+      setDone('Готово: класс сохранён в базе. Отметки смотрите во вкладке «Отметки».')
+    } catch (joinError) {
+      setError(joinError.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="panel">
+      <h2 className="panel__title">Присоединиться к классу</h2>
+      <p className="home__meta">
+        {currentClassName
+          ? `Ваш класс по базе: ${currentClassName}. Можно перейти в другой класс, введя новый код.`
+          : 'Введите код класса (например 7A2025) — после этого вы появитесь в списке класса у учителя.'}
+      </p>
+
+      <form className="form" onSubmit={onSubmit}>
+        <label className="field field--compact">
+          <span className="field__label">Код класса</span>
+          <input
+            className="field__input"
+            type="text"
+            placeholder="7A2025"
+            value={code}
+            onChange={(event) => setCode(event.target.value)}
+            disabled={busy}
+          />
+        </label>
+
+        <button className="button button--primary" type="submit" disabled={busy}>
+          {busy ? (
+            <>
+              <span className="button__spinner" aria-hidden="true" />
+              Проверяем…
+            </>
+          ) : (
+            'Присоединиться'
+          )}
+        </button>
+      </form>
+
+      {error ? (
+        <div className="alert alert--error" role="alert">
+          {error}
+        </div>
+      ) : null}
+
+      {done ? (
+        <div className="alert alert--success" role="status">
+          {done}
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
 export default function HomeScreen() {
-  const { displayName, user, profile, role, className, profileError, signOut } = useAuth()
+  const {
+    displayName,
+    user,
+    profile,
+    role,
+    profileRole,
+    metaRole,
+    className,
+    enrollment,
+    profileError,
+    signOut
+  } = useAuth()
   const [tab, setTab] = useState('diary') // 'diary' | 'grades'
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -64,6 +155,16 @@ export default function HomeScreen() {
           из метаданных авторизации. Подробности: {profileError}
         </div>
       ) : null}
+
+      {metaRole === 'teacher' && profileRole !== 'teacher' && profileRole !== 'admin' ? (
+        <div className="alert alert--info">
+          Вы регистрировались как учитель, но в базе у профиля роль «{profileRole || 'не задана'}».
+          Пока роль не выдана, база не разрешит ставить отметки. Администратору школы нужно
+          выполнить файл <code>supabase/promote_teacher.sql</code> в SQL Editor Supabase.
+        </div>
+      ) : null}
+
+      {role === 'student' && !enrollment ? <JoinClassPanel currentClassName={className} /> : null}
 
       <nav className="tabs tabs--screens" role="tablist">
         <button
@@ -118,6 +219,16 @@ export default function HomeScreen() {
             <dt>Роль</dt>
             <dd>{profile?.role || role || '—'}</dd>
           </div>
+          <div>
+            <dt>Класс</dt>
+            <dd>{className || '—'}</dd>
+          </div>
+          {enrollment?.cardNumber ? (
+            <div>
+              <dt>Номер карты ученика</dt>
+              <dd className="kv__mono">{enrollment.cardNumber}</dd>
+            </div>
+          ) : null}
           <div>
             <dt>Школа</dt>
             <dd>{profile?.school_id || '—'}</dd>

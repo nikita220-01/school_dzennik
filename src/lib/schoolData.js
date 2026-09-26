@@ -1,120 +1,278 @@
 /**
- * Школьные данные (демо-слой на localStorage).
- * API специально простой: позже его можно заменить на запросы к Supabase,
- * не меняя экраны.
+ * Школьные данные — теперь из Supabase (таблицы grades/attendance/students,
+ * представления v_class_roster и v_student_subject_averages).
+ *
+ * Все функции чтения/записи асинхронные: экраны держат данные в состоянии React,
+ * а localStorage больше не используется — отметки видны с любого устройства.
+ *
+ * Чистые функции (average, formatAverage, weekDates, weekTitle) оставлены здесь же,
+ * чтобы экраны по-прежнему импортировали всё из одного модуля.
  */
+import { supabase } from './supabase'
 
-export const SUBJECTS = [
-  'Математика',
-  'Русский язык',
-  'Литература',
-  'История',
-  'Физика',
-  'Химия',
-  'Биология',
-  'География',
-  'Английский язык',
-  'Информатика',
-  'Физкультура'
-]
+/** Отметки 10-балльной шкалы (по убыванию — так удобнее выбирать в списке) */
+export const MARKS = ['10', '9', '8', '7', '6', '5', '4', '3', '2', '1']
 
-export const CLASSES = ['5А', '5Б', '6А', '6Б', '7А', '7Б', '8А', '8Б', '9А', '10А', '11А']
-
-/** Отметки, из которых считается средняя арифметическая («Н» — не оценка) */
-export const MARKS = ['5', '4', '3', '2']
+/** «Н» — не был на уроке. Не оценка, в средний балл не входит */
 export const ABSENT = 'Н'
 
-const GRADES_KEY = 'sd_grades_v1'
-const STUDENTS_KEY = 'sd_students_v1'
+/** Вид отметки в таблице grades: обычная текущая отметка дневника */
+export const GRADE_KIND = 'current'
 
-const SURNAMES = [
-  'Иванов', 'Петров', 'Смирнов', 'Кузнецов', 'Соколов', 'Попов', 'Лебедев', 'Новиков',
-  'Морозов', 'Волков', 'Зайцев', 'Егоров', 'Павлов', 'Семёнов', 'Голубев', 'Виноградов',
-  'Богданов', 'Воробьёв', 'Фёдоров', 'Михайлов'
+/**
+ * В базе посещаемость поурочная (student_id + attend_date + lesson_number),
+ * а клетка дневника — это «день по предмету». Поэтому «Н» из дневника хранится
+ * как один урок дня (номер 1).
+ */
+export const ABSENCE_LESSON_NUMBER = 1
+
+/** Статусы посещаемости, которые в дневнике показываются как «Н» */
+const ABSENCE_STATUSES = ['absent', 'excused']
+
+/** Подсказки к частым ошибкам базы (RLS, дубли, неприменённая схема) */
+const DB_ERROR_HINTS = [
+  {
+    test: /row-level security|permission denied/i,
+    text:
+      'Недостаточно прав в базе. Проверьте, что у аккаунта роль teacher/admin и что учитель назначен ' +
+      'на класс (таблица class_subjects) — это делает supabase/promote_teacher.sql'
+  },
+  { test: /duplicate key/i, text: 'Такая запись уже есть в базе' },
+  { test: /invalid api key|invalid jwt/i, text: 'Не принят ключ проекта Supabase' },
+  {
+    test: /does not exist|schema cache/i,
+    text: 'В базе нет нужной таблицы или представления — примените supabase/apply_all.sql в SQL Editor'
+  }
 ]
-const NAMES = ['Артём', 'София', 'Иван', 'Мария', 'Даниил', 'Анна', 'Пётр', 'Полина', 'Егор', 'Вера']
-const FEMALE_END = { Иванова: true }
 
-function hash(text) {
-  let value = 7
-  for (let i = 0; i < text.length; i += 1) value = (value * 31 + text.charCodeAt(i)) % 1000003
-  return value
+/** Ошибки базы приводим к понятному русскому тексту (оригинал оставляем в скобках) */
+export function translateDbError(error) {
+  const raw = error?.message || error?.hint || String(error || 'неизвестная ошибка')
+  const hint = DB_ERROR_HINTS.find((item) => item.test.test(raw))
+  return hint ? `${hint.text} (${raw})` : raw
 }
 
-function reading(key, fallback) {
-  try {
-    const raw = window.localStorage.getItem(key)
-    return raw ? JSON.parse(raw) : fallback
-  } catch {
-    return fallback
+async function load(query, message) {
+  const { data, error } = await query
+  if (error) throw new Error(`${message}: ${translateDbError(error)}`)
+  return data ?? []
+}
+
+/* ------------------------------------------------------------------ */
+/*  Справочники                                                        */
+/* ------------------------------------------------------------------ */
+
+/** Предметы школы: id нужен для таблицы grades, name — для интерфейса */
+export async function loadSubjects() {
+  return load(
+    supabase.from('subjects').select('id, name, short_name, color').order('name'),
+    'Не удалось загрузить список предметов'
+  )
+}
+
+/** Классы школы: 3А…11Г. Поле invite_code — код для учеников */
+export async function loadClasses() {
+  return load(
+    supabase
+      .from('classes')
+      .select('id, name, grade_level, academic_year, invite_code')
+      .order('grade_level', { ascending: true })
+      .order('name', { ascending: true }),
+    'Не удалось загрузить список классов'
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Ученики класса                                                     */
+/* ------------------------------------------------------------------ */
+
+/** Список учеников класса (виден по правилам RLS: админ, учитель класса, ученик, родитель) */
+export async function loadRoster(classId) {
+  const rows = await load(
+    supabase
+      .from('v_class_roster')
+      .select('student_id, student_name, card_number, is_active')
+      .eq('class_id', classId)
+      .order('student_name'),
+    'Не удалось загрузить список класса'
+  )
+
+  return rows.map((row) => ({
+    id: row.student_id,
+    fullName: row.student_name || 'Без имени',
+    cardNumber: row.card_number,
+    isActive: row.is_active
+  }))
+}
+
+/** Карточка ученика текущего пользователя: класс и номер карты (или null) */
+export async function loadMyStudent(profileId) {
+  if (!profileId) return null
+
+  const { data, error } = await supabase
+    .from('students')
+    .select('id, class_id, card_number, classes ( name )')
+    .eq('profile_id', profileId)
+    .maybeSingle()
+
+  if (error) throw new Error(`Не удалось прочитать карточку ученика: ${translateDbError(error)}`)
+  if (!data) return null
+
+  const related = Array.isArray(data.classes) ? data.classes[0] : data.classes
+
+  return {
+    studentId: data.id,
+    classId: data.class_id,
+    className: related?.name || null,
+    cardNumber: data.card_number
   }
 }
 
-function writing(key, value) {
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value))
-  } catch {
-    /* приватный режим — просто не сохраняем */
+/* ------------------------------------------------------------------ */
+/*  Отметки и пропуски                                                 */
+/* ------------------------------------------------------------------ */
+
+/** Ключ клетки дневника: ученик + дата */
+export function markKey(studentId, date) {
+  return `${studentId}|${date}`
+}
+
+/**
+ * Отметки и пропуски класса за учебную неделю по одному предмету.
+ * Возвращает два словаря: marks['ученик|дата'] = '8' и absences['ученик|дата'] = true
+ */
+export async function loadWeekMarks({ studentIds, subjectId, classId, from, to }) {
+  const empty = { marks: {}, absences: {} }
+  if (!studentIds?.length || !subjectId || !classId) return empty
+
+  const [grades, attendance] = await Promise.all([
+    supabase
+      .from('grades')
+      .select('student_id, grade_date, value')
+      .eq('subject_id', subjectId)
+      .eq('kind', GRADE_KIND)
+      .in('student_id', studentIds)
+      .gte('grade_date', from)
+      .lte('grade_date', to),
+    supabase
+      .from('attendance')
+      .select('student_id, attend_date, status')
+      .eq('class_id', classId)
+      .in('student_id', studentIds)
+      .in('status', ABSENCE_STATUSES)
+      .gte('attend_date', from)
+      .lte('attend_date', to)
+  ])
+
+  if (grades.error) throw new Error(`Не удалось загрузить отметки: ${translateDbError(grades.error)}`)
+  if (attendance.error) {
+    throw new Error(`Не удалось загрузить посещаемость: ${translateDbError(attendance.error)}`)
   }
+
+  const marks = {}
+  for (const row of grades.data ?? []) marks[markKey(row.student_id, row.grade_date)] = String(row.value)
+
+  const absences = {}
+  for (const row of attendance.data ?? []) absences[markKey(row.student_id, row.attend_date)] = true
+
+  return { marks, absences }
 }
 
-function femaleSurname(surname) {
-  return FEMALE_END[surname] ? surname : `${surname}а`
+/** Средние баллы ученика по предметам (представление v_student_subject_averages) */
+export async function loadSubjectAverages(studentId) {
+  if (!studentId) return []
+  return load(
+    supabase
+      .from('v_student_subject_averages')
+      .select('subject_id, subject_name, average, weighted_average, grades_count')
+      .eq('student_id', studentId)
+      .order('subject_name'),
+    'Не удалось загрузить средние баллы'
+  )
 }
 
-/** Ученики класса: демо-состав (детерминированный по названию класса) + зарегистрированные */
-export function getRoster(classId) {
-  const registered = reading(STUDENTS_KEY, {})[classId] || []
-  const seed = hash(classId)
-  const list = []
 
-  for (let i = 0; i < 12; i += 1) {
-    const surname = SURNAMES[(seed + i * 3) % SURNAMES.length]
-    const name = NAMES[(seed + i * 5) % NAMES.length]
-    const isGirl = (seed + i) % 2 === 1
-    list.push({ id: `${classId}-demo-${i}`, fullName: `${isGirl ? femaleSurname(surname) : surname} ${name}` })
-  }
+/**
+ * Учитель ставит числовую отметку 1…10.
+ * upsert по ключу (ученик + предмет + дата + вид): повторное сохранение клетки
+ * обновляет ту же отметку, а не создаёт дубль.
+ */
+export async function saveMark({ studentId, subjectId, date, value, teacherId }) {
+  const { error } = await supabase.from('grades').upsert(
+    {
+      student_id: studentId,
+      subject_id: subjectId,
+      grade_date: date,
+      kind: GRADE_KIND,
+      value: Number(value),
+      teacher_id: teacherId || null
+    },
+    { onConflict: 'student_id,subject_id,grade_date,kind' }
+  )
 
-  registered.forEach((student) => {
-    if (!list.some((item) => item.fullName === student.fullName)) {
-      list.push({ id: `${classId}-user-${hash(student.fullName)}`, fullName: student.fullName })
-    }
-  })
-
-  return list
+  if (error) throw new Error(`Не удалось сохранить отметку: ${translateDbError(error)}`)
 }
 
-export function addStudent(classId, fullName) {
-  const all = reading(STUDENTS_KEY, {})
-  const list = all[classId] || []
-  if (!list.some((item) => item.fullName === fullName)) list.push({ fullName })
-  all[classId] = list
-  writing(STUDENTS_KEY, all)
+/** Учитель ставит «Н»: запись в attendance + убираем отметку этого предмета за день */
+export async function saveAbsent({ studentId, subjectId, classId, date, teacherId }) {
+  const { error } = await supabase.from('attendance').upsert(
+    {
+      student_id: studentId,
+      class_id: classId,
+      attend_date: date,
+      lesson_number: ABSENCE_LESSON_NUMBER,
+      status: 'absent',
+      marked_by: teacherId || null
+    },
+    { onConflict: 'student_id,attend_date,lesson_number' }
+  )
+
+  if (error) throw new Error(`Не удалось сохранить пропуск: ${translateDbError(error)}`)
+  await deleteMark({ studentId, subjectId, date })
 }
 
-function cellKey(classId, subject, date, studentId) {
-  return `${classId}|${subject}|${date}|${studentId}`
+async function deleteMark({ studentId, subjectId, date }) {
+  const { error } = await supabase
+    .from('grades')
+    .delete()
+    .eq('student_id', studentId)
+    .eq('subject_id', subjectId)
+    .eq('grade_date', date)
+    .eq('kind', GRADE_KIND)
+
+  if (error) throw new Error(`Не удалось убрать отметку: ${translateDbError(error)}`)
 }
 
-export { cellKey as markKey }
+/**
+ * Очистить клетку («—»): убираем отметку предмета за этот день и отметку «Н» дня.
+ * «Н» в дневнике — день целиком, поэтому очистка снимает её у ученика на весь день.
+ */
+export async function clearCell({ studentId, subjectId, date }) {
+  await deleteMark({ studentId, subjectId, date })
 
-/** Все отметки одним объектом (чтобы не читать хранилище на каждую клетку) */
-export function getAllMarks() {
-  return reading(GRADES_KEY, {})
+  const { error } = await supabase
+    .from('attendance')
+    .delete()
+    .eq('student_id', studentId)
+    .eq('attend_date', date)
+    .eq('lesson_number', ABSENCE_LESSON_NUMBER)
+
+  if (error) throw new Error(`Не удалось очистить клетку: ${translateDbError(error)}`)
 }
 
-export function getMark(classId, subject, date, studentId) {
-  return reading(GRADES_KEY, {})[cellKey(classId, subject, date, studentId)] || ''
+/** Ученик присоединяется к классу по коду приглашения (RPC join_class) */
+export async function joinClass(code) {
+  const trimmed = (code || '').trim()
+  if (!trimmed) throw new Error('Укажите код класса, например 7A2025')
+
+  const { data, error } = await supabase.rpc('join_class', { p_invite_code: trimmed })
+  if (error) throw new Error(translateDbError(error))
+  return data
 }
 
-export function setMark(classId, subject, date, studentId, value) {
-  const all = reading(GRADES_KEY, {})
-  const key = cellKey(classId, subject, date, studentId)
-  if (value) all[key] = value
-  else delete all[key]
-  writing(GRADES_KEY, all)
-  return all
-}
+/* ------------------------------------------------------------------ */
+/*  Вычисления и даты (без обращения к базе)                           */
+/* ------------------------------------------------------------------ */
 
 /** Средняя арифметическая по числовым отметкам; «Н» и пустые клетки игнорируются */
 export function average(marks) {
@@ -125,7 +283,7 @@ export function average(marks) {
 }
 
 export function formatAverage(value) {
-  return value === null ? '—' : value.toFixed(2)
+  return value === null || value === undefined ? '—' : Number(value).toFixed(2)
 }
 
 function iso(date) {
@@ -165,3 +323,4 @@ export function weekTitle(offset) {
   const to = dates[dates.length - 1]
   return offset === 0 ? 'Текущая неделя' : `${from.label} — ${to.label}`
 }
+
