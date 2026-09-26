@@ -14,7 +14,7 @@
 | `migrations/20260101000003_03_rls_policies.sql` | 51 политика RLS: ученик видит только себя, оценку ставит учитель-предметник класса или админ |
 | `migrations/20260101000004_04_views.sql` | 5 представлений: `v_student_diary`, `v_student_subject_averages`, `v_class_roster`, `v_week_schedule`, `v_student_homework` |
 | `seed.sql` | демо-данные: школа, 4 четверти 2025/2026, 15 предметов, класс 7А |
-| `promote_teacher.sql` | назначение роли `teacher` конкретному пользователю по e-mail |
+| `promote_teacher.sql` | назначение роли `teacher` (по метаданным регистрации, без ввода e-mail; умеет обходить защитный триггер `profiles`) |
 
 ## Способ 1 — одним файлом (быстро)
 
@@ -47,8 +47,26 @@ select count(*) from public.schools;
 В базе роль хранится **строчными** буквами: `teacher` (ENUM `user_role`: `admin`, `teacher`, `student`, `parent`).
 Триггер `handle_new_user()` при регистрации уважает только `student` и `parent`, поэтому учителя назначают вручную:
 
-1. Открыть [promote_teacher.sql](https://raw.githubusercontent.com/nikita220-01/school_dzennik/main/supabase/promote_teacher.sql), заменить `teacher@example.com` на свой e-mail (**3 места**), запустить в SQL Editor.
-2. Или через интерфейс: **Authentication → Users** → пользователь → Raw user meta data → `{"role":"teacher"}` → Save, плюс **Table Editor → profiles** → `role = teacher`.
+1. Открыть [promote_teacher.sql](https://raw.githubusercontent.com/nikita220-01/school_dzennik/main/supabase/promote_teacher.sql) и запустить целиком в **SQL Editor** — правки внутри файла не нужны.
+   Скрипт сам находит пользователей, которые регистрировались как учитель (в метаданных `role = teacher`/`учитель`),
+   а если таких нет — назначает `teacher` самому новому аккаунту; в конце печатает проверочную таблицу.
+
+> **Почему нельзя просто `update public.profiles set role = ...` и почему не работает Table Editor.**
+> В схеме есть триггер `trg_profiles_protect_fields` (`before update on public.profiles`), который разрешает менять
+> `role`/`is_active` только администратору (`public.is_admin()`). И в SQL Editor, и у запросов панели нет JWT →
+> `auth.uid()` = NULL → любая попытка заканчивается ошибкой
+> `P0001: Менять роль или активность профиля может только администратор`.
+> Поэтому `promote_teacher.sql` на время смены роли отключает триггер и включает обратно. Вручную это выглядит так:
+>
+> ```sql
+> alter table public.profiles disable trigger trg_profiles_protect_fields;
+> update public.profiles set role = 'teacher', updated_at = now()
+>  where id = (select id from auth.users where email = 'кто-то@example.com');
+> alter table public.profiles enable trigger trg_profiles_protect_fields;
+> ```
+>
+> Роль в `auth.users.raw_user_meta_data` (`{"role":"teacher"}`) меняется и через интерфейс
+> **Authentication → Users**, но она лишь вспомогательная: настоящая роль — в `public.profiles`.
 
 Приложение понимает и `teacher`, и `Teacher`, и `Учитель` (нормализация роли в `src/context/AuthContext.jsx`).
 
