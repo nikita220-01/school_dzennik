@@ -1,0 +1,9 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# SPA: любой путь отдаёт index.html (чтобы прямые ссылки и обновление страницы работали)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

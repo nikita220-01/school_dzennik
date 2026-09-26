@@ -1,20 +1,23 @@
 import { createClient } from '@supabase/supabase-js'
 
-const url = import.meta.env.VITE_SUPABASE_URL
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
-
-if (!url || !anonKey) {
-  throw new Error(
-    'Не заданы VITE_SUPABASE_URL или VITE_SUPABASE_ANON_KEY. ' +
-      'Скопируйте .env.example в .env и вставьте значения из Supabase (Project Settings → API Keys).'
-  )
-}
-
 /**
- * Единственный клиент Supabase для всего приложения.
- * Используется только ПУБЛИЧНЫЙ ключ (publishable / anon):
- * доступ к данным ограничивается правилами RLS на стороне базы.
+ * Запасные значения (fallback).
+ * Публичный publishable-ключ не секретный: он попадает в JS и действует только в рамках RLS.
+ * Переменные окружения VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY имеют приоритет.
  */
+const FALLBACK_URL = 'https://ftvhzgdggzcthyfvzcbh.supabase.co'
+const FALLBACK_ANON_KEY = 'sb_publishable_C3RVV2BMDfwdK5wv5nGt8w_Pm17Z_QH'
+
+const url = import.meta.env.VITE_SUPABASE_URL || FALLBACK_URL
+const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || FALLBACK_ANON_KEY
+
+/** Понятное сообщение вместо пустого экрана, если переменные окружения не заданы и fallback пуст */
+export const configError =
+  !url || !anonKey
+    ? 'Не заданы VITE_SUPABASE_URL и/или VITE_SUPABASE_ANON_KEY. ' +
+      'Проверьте значения в src/lib/supabase.js (константы FALLBACK_*) или в .env.'
+    : null
+
 export const supabase = createClient(url, anonKey, {
   auth: {
     persistSession: true,
@@ -24,3 +27,4 @@ export const supabase = createClient(url, anonKey, {
 })
 
 export const SUPABASE_URL = url
+
