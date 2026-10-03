@@ -260,6 +260,20 @@ export async function clearCell({ studentId, subjectId, date }) {
   if (error) throw new Error(`Не удалось очистить клетку: ${translateDbError(error)}`)
 }
 
+/** Учитель (или админ) переводит ученика в другой класс: меняется только students.class_id */
+export async function moveStudentToClass({ studentId, classId }) {
+  if (!studentId || !classId) throw new Error('Выберите ученика и новый класс')
+
+  const { error } = await supabase
+    .from('students')
+    .update({ class_id: classId })
+    .eq('id', studentId)
+
+  if (error) {
+    throw new Error(`Не удалось перевести ученика: ${translateDbError(error)}`)
+  }
+}
+
 /** Ученик присоединяется к классу по коду приглашения (RPC join_class) */
 export async function joinClass(code) {
   const trimmed = (code || '').trim()
@@ -293,7 +307,7 @@ function iso(date) {
   return `${y}-${m}-${d}`
 }
 
-const WEEKDAYS = ['пн', 'вт', 'ср', 'чт', 'пт']
+const WEEKDAYS = ['Пон', 'Вто', 'Сре', 'Чет', 'Пят']
 
 /** Учебная неделя: 5 дней. offset — смещение в неделях (0 — текущая) */
 export function weekDates(offset = 0) {
@@ -311,7 +325,7 @@ export function weekDates(offset = 0) {
     return {
       value: iso(date),
       weekday,
-      label: `${dayNumber}.${monthNumber}`,
+      label: `${dayNumber}.${monthNumber}.${date.getFullYear()}`,
       isToday: iso(date) === iso(today)
     }
   })
@@ -321,6 +335,7 @@ export function weekTitle(offset) {
   const dates = weekDates(offset)
   const from = dates[0]
   const to = dates[dates.length - 1]
-  return offset === 0 ? 'Текущая неделя' : `${from.label} — ${to.label}`
+  const range = `${from.label} — ${to.label}`
+  return offset === 0 ? `Текущая неделя · ${range}` : range
 }
 

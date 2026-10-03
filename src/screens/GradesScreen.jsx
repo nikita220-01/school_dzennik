@@ -12,6 +12,7 @@ import {
   loadSubjects,
   loadWeekMarks,
   markKey,
+  moveStudentToClass,
   saveAbsent,
   saveMark,
   weekDates,
@@ -42,6 +43,11 @@ export default function GradesScreen() {
   const [loading, setLoading] = useState(true)
   const [savingCell, setSavingCell] = useState(null)
   const [error, setError] = useState(null)
+  // Перевод ученика в другой класс (только учитель/админ)
+  const [moveStudentId, setMoveStudentId] = useState('')
+  const [moveClassId, setMoveClassId] = useState('')
+  const [moving, setMoving] = useState(false)
+  const [moveNotice, setMoveNotice] = useState(null)
 
   const dates = useMemo(() => weekDates(weekOffset), [weekOffset])
   const weekFrom = dates[0].value
@@ -208,6 +214,26 @@ export default function GradesScreen() {
   }
 
 
+  const handleMoveStudent = async () => {
+    if (!moveStudentId || !moveClassId) return
+
+    setMoving(true)
+    setMoveNotice(null)
+    setError(null)
+
+    try {
+      await moveStudentToClass({ studentId: moveStudentId, classId: moveClassId })
+      const target = classes.find((item) => item.id === moveClassId)
+      setMoveNotice(`Ученик переведён в ${target?.name || 'другой'} класс.`)
+      setMoveStudentId('')
+      await loadWeek()
+    } catch (moveError) {
+      setError(moveError.message)
+    } finally {
+      setMoving(false)
+    }
+  }
+
   const emptyText = (() => {
     if (!classes.length) {
       return (
@@ -371,6 +397,69 @@ export default function GradesScreen() {
           </tbody>
         </table>
       </div>
+
+      {isTeacher ? (
+        <section className="panel">
+          <h2 className="panel__title">Перевод ученика в другой класс</h2>
+          <p className="grades__hint">
+            Меняется только класс ученика: вход в систему, отметки и карточка остаются те же.
+            Ученик исчезнет из текущего списка и появится в новом классе.
+          </p>
+
+          <div className="grades__controls">
+            <label className="field field--compact">
+              <span className="field__label">Ученик из класса {selectedClass?.name || '—'}</span>
+              <select
+                className="field__input"
+                value={moveStudentId}
+                onChange={(event) => setMoveStudentId(event.target.value)}
+                disabled={moving || !roster.length}
+              >
+                <option value="">— выберите ученика —</option>
+                {roster.map((student) => (
+                  <option key={student.id} value={student.id}>
+                    {student.fullName}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field field--compact">
+              <span className="field__label">Новый класс</span>
+              <select
+                className="field__input"
+                value={moveClassId}
+                onChange={(event) => setMoveClassId(event.target.value)}
+                disabled={moving || !classes.length}
+              >
+                <option value="">— выберите класс —</option>
+                {classes
+                  .filter((item) => item.id !== classId)
+                  .map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} класс
+                    </option>
+                  ))}
+              </select>
+            </label>
+
+            <button
+              className="button button--primary"
+              type="button"
+              onClick={handleMoveStudent}
+              disabled={moving || !moveStudentId || !moveClassId}
+            >
+              {moving ? 'Переводим…' : 'Перевести'}
+            </button>
+          </div>
+
+          {moveNotice ? (
+            <div className="alert alert--success" role="status">
+              {moveNotice}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       {!isTeacher && subjectAverages.length ? (
         <div className="panel">

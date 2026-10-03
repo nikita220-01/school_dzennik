@@ -27,6 +27,7 @@
 | `seed.sql` | демо-данные: школа, 4 четверти 2025/2026, 15 предметов, **36 классов** 3А…11Г с кодами приглашения (7A2025, 11G2025 …) |
 | `promote_teacher.sql` | назначение роли `teacher` (по метаданным регистрации, без ввода e-mail; умеет обходить защитный триггер `profiles`) + назначение учителя на классы и предметы (`class_subjects`) |
 | `migrations/20260101000005_05_classes_and_grades_scale.sql` | классы 3А…11Г (36 штук) и **10-балльная шкала** оценок (`grades_value_check`: 1…10) + уникальный ключ отметки для upsert |
+| `migrations/20260101000006_06_teacher_can_move_students.sql` | учитель может **переводить ученика в другой класс** (политика `students_update_teacher` на `students`) |
 
 Собрать `apply_all.sql` заново после правки любого файла: `npm run build:sql`, проверить всё: `npm run check:sql`.
 
@@ -46,8 +47,9 @@
 4. [03_rls_policies.sql](https://raw.githubusercontent.com/nikita220-01/school_dzennik/main/supabase/migrations/20260101000003_03_rls_policies.sql)
 5. [04_views.sql](https://raw.githubusercontent.com/nikita220-01/school_dzennik/main/supabase/migrations/20260101000004_04_views.sql)
 6. [05_classes_and_grades_scale.sql](https://raw.githubusercontent.com/nikita220-01/school_dzennik/main/supabase/migrations/20260101000005_05_classes_and_grades_scale.sql) — классы 3А…11Г и 10-балльная шкала
-7. [seed.sql](https://raw.githubusercontent.com/nikita220-01/school_dzennik/main/supabase/seed.sql)
-8. [promote_teacher.sql](https://raw.githubusercontent.com/nikita220-01/school_dzennik/main/supabase/promote_teacher.sql) — уже после регистрации в приложении
+7. [06_teacher_can_move_students.sql](https://raw.githubusercontent.com/nikita220-01/school_dzennik/main/supabase/migrations/20260101000006_06_teacher_can_move_students.sql) — учитель переводит ученика в другой класс
+8. [seed.sql](https://raw.githubusercontent.com/nikita220-01/school_dzennik/main/supabase/seed.sql)
+9. [promote_teacher.sql](https://raw.githubusercontent.com/nikita220-01/school_dzennik/main/supabase/promote_teacher.sql) — уже после регистрации в приложении
 
 ## Проверка
 

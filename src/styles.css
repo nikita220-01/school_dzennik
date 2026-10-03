@@ -738,69 +738,68 @@ code {
 
 .grades__table-wrap {
   overflow-x: auto;
-  border: 1px solid var(--border);
+  border: 2px solid #475569;
   border-radius: var(--radius);
-  background: var(--panel);
+  background: #ffffff;
 }
 
 .grades__table {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
+  background: #ffffff;
+  color: #0f172a;
 }
 
 .grades__table th,
 .grades__table td {
   padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
-  border-right: 1px solid var(--border);
+  border: 1px solid #94a3b8;
   text-align: center;
+  background: #ffffff;
+  color: #0f172a;
 }
 
 .grades__table thead th {
   position: sticky;
   top: 0;
-  background: var(--bg-soft);
-  font-weight: 600;
-  color: var(--muted);
+  background: #e2e8f0;
+  color: #1e293b;
+  font-weight: 700;
+}
+
+.grades__table tbody th,
+.grades__table .grades__student-col {
+  background: #ffffff;
+  color: #0f172a;
 }
 
 .grades__table thead th.is-today,
 .grades__table td.is-today {
-  background: rgba(99, 102, 241, 0.12);
-}
-
-.grades__table th:last-child,
-.grades__table td:last-child {
-  border-right: none;
-}
-
-.grades__student-col {
-  min-width: 190px;
-  text-align: left !important;
-  font-weight: 500;
-  white-space: nowrap;
+  background: #dbeafe;
 }
 
 .grades__date {
   display: block;
-  color: var(--text);
+  color: #0f172a;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .grades__weekday {
+  display: block;
   font-size: 11px;
-  text-transform: lowercase;
-  opacity: 0.7;
+  color: #475569;
 }
 
 .grades__average-cell {
-  font-weight: 600;
-  color: #a5b4fc;
+  font-weight: 700;
+  color: #4338ca;
 }
 
 .grades__empty {
   padding: 22px;
-  color: var(--muted);
+  color: #475569;
 }
 
 .grades__hint {
@@ -894,9 +893,6 @@ button.mark-cell {
 
   .grades__student-col {
     min-width: 140px;
-  }
-}
-
   }
 }
 
