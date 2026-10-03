@@ -138,22 +138,28 @@ export function markKey(studentId, date) {
 }
 
 /**
- * Отметки и пропуски класса за учебную неделю по одному предмету.
- * Возвращает два словаря: marks['ученик|дата'] = '8' и absences['ученик|дата'] = true
+ * Отметки и пропуски класса за учебную неделю.
+ * subjectId = 'ALL' (или пусто) — показать отметки по всем предметам сразу:
+ * тогда в клетке будет «8, 9» (несколько предметов за день).
  */
 export async function loadWeekMarks({ studentIds, subjectId, classId, from, to }) {
   const empty = { marks: {}, absences: {} }
-  if (!studentIds?.length || !subjectId || !classId) return empty
+  if (!studentIds?.length || !classId) return empty
+
+  const allSubjects = subjectId === 'ALL' || !subjectId
+
+  let gradesQuery = supabase
+    .from('grades')
+    .select('student_id, grade_date, value')
+    .eq('kind', GRADE_KIND)
+    .in('student_id', studentIds)
+    .gte('grade_date', from)
+    .lte('grade_date', to)
+
+  if (!allSubjects) gradesQuery = gradesQuery.eq('subject_id', subjectId)
 
   const [grades, attendance] = await Promise.all([
-    supabase
-      .from('grades')
-      .select('student_id, grade_date, value')
-      .eq('subject_id', subjectId)
-      .eq('kind', GRADE_KIND)
-      .in('student_id', studentIds)
-      .gte('grade_date', from)
-      .lte('grade_date', to),
+    gradesQuery,
     supabase
       .from('attendance')
       .select('student_id, attend_date, status')
@@ -170,7 +176,11 @@ export async function loadWeekMarks({ studentIds, subjectId, classId, from, to }
   }
 
   const marks = {}
-  for (const row of grades.data ?? []) marks[markKey(row.student_id, row.grade_date)] = String(row.value)
+  for (const row of grades.data ?? []) {
+    const key = markKey(row.student_id, row.grade_date)
+    const value = String(row.value)
+    marks[key] = marks[key] ? `${marks[key]}, ${value}` : value
+  }
 
   const absences = {}
   for (const row of attendance.data ?? []) absences[markKey(row.student_id, row.attend_date)] = true

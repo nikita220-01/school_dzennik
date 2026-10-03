@@ -3,7 +3,6 @@ import { useAuth } from '../context/AuthContext'
 import {
   ABSENT,
   MARKS,
-  average,
   clearCell,
   formatAverage,
   loadClasses,
@@ -19,14 +18,18 @@ import {
   weekTitle
 } from '../lib/schoolData'
 
+/** Значение выпадающего списка «Все предметы» (просмотр всех предметов сразу) */
+const ALL_SUBJECTS = 'ALL'
+
 /**
- * Экран «Отметки» на данных Supabase:
- *  • учитель (role teacher/admin) ставит отметки 1…10 и «Н» любому классу, куда назначен;
- *  • ученик видит свой класс, свои отметки и средние баллы по предметам;
- *  • данные лежат в таблицах grades / attendance, поэтому видны с любого устройства.
+ * Экран «Отметки»: отдельные «листы», как в Excel.
+ *  1) обрамление: выбор класса и предмета, стрелки «← →» перелистывают неделю
+ *     (пять рабочих дней на страницу);
+ *  2) пробел и второе обрамление: журнал — ученики в столбик, даты сверху;
+ *  3) клетки пустые: учитель нажимает клетку и в отдельном окне выбирает отметку.
  */
 export default function GradesScreen() {
-  const { role, profile, displayName, enrollment, classId: myClassId } = useAuth()
+  const { role, profile, enrollment, classId: myClassId } = useAuth()
   const isTeacher = role === 'teacher' || role === 'admin'
   const teacherId = profile?.id || null
   const myStudentId = enrollment?.studentId || null
@@ -34,24 +37,26 @@ export default function GradesScreen() {
   const [classes, setClasses] = useState([])
   const [subjects, setSubjects] = useState([])
   const [classId, setClassId] = useState(myClassId || '')
-  const [subjectId, setSubjectId] = useState('')
+  const [subjectId, setSubjectId] = useState(ALL_SUBJECTS)
   const [weekOffset, setWeekOffset] = useState(0)
   const [roster, setRoster] = useState([])
   const [marks, setMarks] = useState({})
   const [absences, setAbsences] = useState({})
   const [subjectAverages, setSubjectAverages] = useState([])
   const [loading, setLoading] = useState(true)
-  const [savingCell, setSavingCell] = useState(null)
   const [error, setError] = useState(null)
-  // Перевод ученика в другой класс (только учитель/админ)
+  const [saving, setSaving] = useState(false)
+  /** Открытая клетка: { studentId, date, name } — накладное окно выбора отметки */
+  const [cell, setCell] = useState(null)
   const [moveStudentId, setMoveStudentId] = useState('')
   const [moveClassId, setMoveClassId] = useState('')
   const [moving, setMoving] = useState(false)
-  const [moveNotice, setMoveNotice] = useState(null)
+  const [notice, setNotice] = useState(null)
 
   const dates = useMemo(() => weekDates(weekOffset), [weekOffset])
   const weekFrom = dates[0].value
   const weekTo = dates[dates.length - 1].value
+  const singleSubject = subjectId !== ALL_SUBJECTS
 
   // 1. Справочники: классы (3А…11Г) и предметы
   useEffect(() => {
@@ -64,7 +69,6 @@ export default function GradesScreen() {
         setClasses(classRows)
         setSubjects(subjectRows)
         setClassId((current) => current || classRows[0]?.id || '')
-        setSubjectId((current) => current || subjectRows[0]?.id || '')
       } catch (loadError) {
         if (alive) {
           setError(loadError.message)
@@ -79,14 +83,14 @@ export default function GradesScreen() {
     }
   }, [])
 
-  // Ученик всегда смотрит свой класс — выбор класса ему недоступен
+  // Ученик всегда смотрит свой класс
   useEffect(() => {
     if (!isTeacher && myClassId) setClassId(myClassId)
   }, [isTeacher, myClassId])
 
   // 2. Список класса и отметки недели
   const loadWeek = useCallback(async () => {
-    if (!classId || !subjectId) {
+    if (!classId) {
       setRoster([])
       setMarks({})
       setAbsences({})
@@ -128,8 +132,7 @@ export default function GradesScreen() {
   useEffect(() => {
     loadWeek()
   }, [loadWeek])
-
-  // 3. Средние баллы ученика по предметам (представление v_student_subject_averages)
+// 3. Средние баллы ученика по предметам
   useEffect(() => {
     let alive = true
 
@@ -155,7 +158,7 @@ export default function GradesScreen() {
     }
   }, [isTeacher, myStudentId])
 
-  // 4. Значения клеток: отметка «перебивает» пропуск дня
+  // 4. Значение клетки: отметка важнее пропуска дня
   const markOf = (studentId, date) => marks[markKey(studentId, date)] || ''
   const cellValueOf = (studentId, date) =>
     markOf(studentId, date) || (absences[markKey(studentId, date)] ? ABSENT : '')
@@ -166,33 +169,16 @@ export default function GradesScreen() {
     return roster.filter((student) => student.id === myStudentId)
   }, [isTeacher, roster, myStudentId])
 
-  const classAverage = average(
-    rows.flatMap((student) => dates.map((date) => markOf(student.id, date)))
-  )
-
   const selectedClass = classes.find((item) => item.id === classId) || null
   const selectedSubject = subjects.find((item) => item.id === subjectId) || null
 
-  // Числовые отметки колонки-дня (для строк «Максимум» / «Минимум» / «Среднее»)
-  const columnMarks = (date) =>
-    rows
-      .map((student) => markOf(student.id, date))
-      .filter((mark) => MARKS.includes(mark))
-      .map(Number)
+  // 5. Сохранение отметки, выбранной в накладном окне
+  const applyMark = async (value) => {
+    if (!cell || !singleSubject || saving) return
 
-  const columnStat = (date, kind) => {
-    const numbers = columnMarks(date)
-    if (!numbers.length) return null
-    if (kind === 'max') return Math.max(...numbers)
-    if (kind === 'min') return Math.min(...numbers)
-    return average(numbers.map(String))
-  }
-
-  const onMarkChange = async (studentId, date, value) => {
-    if (!subjectId) return
-
+    const { studentId, date } = cell
     const key = markKey(studentId, date)
-    setSavingCell(key)
+    setSaving(true)
     setError(null)
 
     try {
@@ -220,27 +206,27 @@ export default function GradesScreen() {
         await saveMark({ studentId, subjectId, date, value, teacherId })
         setMarks((current) => ({ ...current, [key]: value }))
       }
+
+      setCell(null)
     } catch (saveError) {
       setError(saveError.message)
-      // Показываем то, что реально лежит в базе
       loadWeek()
     } finally {
-      setSavingCell(null)
+      setSaving(false)
     }
   }
-
 
   const handleMoveStudent = async () => {
     if (!moveStudentId || !moveClassId) return
 
     setMoving(true)
-    setMoveNotice(null)
+    setNotice(null)
     setError(null)
 
     try {
       await moveStudentToClass({ studentId: moveStudentId, classId: moveClassId })
       const target = classes.find((item) => item.id === moveClassId)
-      setMoveNotice(`Ученик переведён в ${target?.name || 'другой'} класс.`)
+      setNotice(`Ученик переведён в ${target?.name || 'другой'} класс.`)
       setMoveStudentId('')
       await loadWeek()
     } catch (moveError) {
@@ -250,81 +236,87 @@ export default function GradesScreen() {
     }
   }
 
-  const emptyText = (() => {
-    if (!classes.length) {
-      return (
-        'Классы не найдены. Примените supabase/apply_all.sql — он создаёт 36 классов 3А…11Г, ' +
-        'и проверьте доступ: учителя назначает supabase/promote_teacher.sql.'
-      )
-    }
-
-    if (isTeacher) {
-      return selectedClass?.invite_code
-        ? `В классе ${selectedClass.name} пока нет учеников. Передайте ученикам код ${selectedClass.invite_code} — после регистрации и ввода кода они появятся здесь.`
-        : 'В этом классе пока нет учеников'
-    }
-
-    return myStudentId
-      ? 'За эту неделю отметок нет — их поставит учитель'
-      : 'Вы ещё не в классе: введите код класса на главной странице в блоке «Присоединиться к классу»'
-  })()
-
-  return (
+  const emptyText = !classes.length
+    ? 'Классы не найдены: примените supabase/apply_all.sql и supabase/promote_teacher.sql'
+    : isTeacher
+      ? `В классе ${selectedClass?.name || ''} нет учеников${
+          selectedClass?.invite_code ? `. Код класса для учеников: ${selectedClass.invite_code}` : ''
+        }`
+      : myStudentId
+        ? 'За эту неделю отметок нет'
+        : 'Вы ещё не в классе: введите код класса на главной странице'
+return (
     <div className="grades">
-      <div className="grades__controls">
-        <label className="field field--compact">
-          <span className="field__label">Класс</span>
-          <select
-            className="field__input"
-            value={classId}
-            onChange={(event) => setClassId(event.target.value)}
-            disabled={!isTeacher || !classes.length}
-          >
-            {classes.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name} класс
-              </option>
-            ))}
-          </select>
-        </label>
+      {/* ЛИСТ 1 — обрамление с выбором класса и предмета */}
+      <section className="sheet">
+        <h2 className="sheet__title">Журнал отметок</h2>
 
-        <label className="field field--compact">
-          <span className="field__label">Предмет</span>
-          <select
-            className="field__input"
-            value={subjectId}
-            onChange={(event) => setSubjectId(event.target.value)}
-            disabled={!subjects.length}
-          >
-            {subjects.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="sheet__row">
+          <label className="field field--compact">
+            <span className="field__label">Класс</span>
+            <select
+              className="field__input"
+              value={classId}
+              onChange={(event) => setClassId(event.target.value)}
+              disabled={!isTeacher || !classes.length}
+            >
+              {classes.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name} класс
+                </option>
+              ))}
+            </select>
+          </label>
 
-        <div className="grades__week">
-          <span className="field__label">Неделя</span>
-          <div className="grades__week-nav">
-            <button
-              type="button"
-              className="button button--ghost button--small"
-              onClick={() => setWeekOffset((current) => current - 1)}
+          <label className="field field--compact">
+            <span className="field__label">Предмет</span>
+            <select
+              className="field__input"
+              value={subjectId}
+              onChange={(event) => setSubjectId(event.target.value)}
             >
-              ←
-            </button>
-            <span className="grades__week-title">{weekTitle(weekOffset)}</span>
-            <button
-              type="button"
-              className="button button--ghost button--small"
-              onClick={() => setWeekOffset((current) => current + 1)}
-            >
-              →
-            </button>
+              <option value={ALL_SUBJECTS}>Все предметы</option>
+              {subjects.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="grades__week">
+            <span className="field__label">Страница (5 рабочих дней)</span>
+            <div className="grades__week-nav">
+              <button
+                type="button"
+                className="button button--ghost button--small"
+                onClick={() => setWeekOffset((current) => current - 1)}
+              >
+                ←
+              </button>
+              <span className="grades__week-title">{weekTitle(weekOffset)}</span>
+              <button
+                type="button"
+                className="button button--ghost button--small"
+                onClick={() => setWeekOffset((current) => current + 1)}
+              >
+                →
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+
+        {isTeacher && selectedClass?.invite_code ? (
+          <p className="sheet__note">Код класса для учеников: {selectedClass.invite_code}</p>
+        ) : null}
+
+        {!singleSubject ? (
+          <p className="sheet__note">
+            Просмотр всех предметов: в клетке видно «8, 9» — это разные предметы за день. Чтобы
+            поставить отметку, выберите конкретный предмет.
+          </p>
+        ) : null}
+      </section>
 
       {error ? (
         <div className="alert alert--error" role="alert">
@@ -332,126 +324,106 @@ export default function GradesScreen() {
         </div>
       ) : null}
 
-      <div className="grades__summary">
-        <span className="badge badge--role">
-          {isTeacher
-            ? `Класс ${selectedClass?.name || '—'}`
-            : `Мои отметки · ${selectedClass?.name || 'класс не выбран'}`}
-        </span>
-        {isTeacher && selectedClass?.invite_code ? (
-          <span className="badge">Код класса для учеников: {selectedClass.invite_code}</span>
-        ) : null}
-        <span className="grades__average">
-          Средняя по {isTeacher ? 'классу' : 'неделе'}: <strong>{formatAverage(classAverage)}</strong>
-        </span>
-        <span className="grades__legend">
-          Шкала 1–10 · <strong>{ABSENT}</strong> — не был на уроке (в средний балл не входит)
-        </span>
-      </div>
-
-
-      <div className="grades__table-wrap">
-        <table className="grades__table">
-          <thead>
-            <tr>
-              <th className="grades__title" colSpan={dates.length + 2}>
-                {selectedClass ? `${selectedClass.name} класс` : 'Класс не выбран'}
-                {selectedSubject ? ` · ${selectedSubject.name}` : ''}
-                {' · '}
-                {weekTitle(weekOffset)}
-              </th>
-            </tr>
-            <tr>
-              <th className="grades__student-col">Ученик</th>
-              {dates.map((date) => (
-                <th key={date.value} className={date.isToday ? 'is-today' : ''}>
-                  <span className="grades__date">{date.label}</span>
-                  <span className="grades__weekday">{date.weekday}</span>
-                </th>
-              ))}
-              <th>Средний</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((student) => (
-              <tr key={student.id}>
-                <th className="grades__student-col" scope="row">
-                  {student.fullName}
-                </th>
-                {dates.map((date) => {
-                  const cellKey = markKey(student.id, date.value)
-                  const value = cellValueOf(student.id, date.value)
-
-                  return (
-                    <td key={date.value} className={date.isToday ? 'is-today' : ''}>
-                      {isTeacher ? (
-                        <select
-                          className={`mark-cell mark-cell--${value || 'empty'}`}
-                          value={value}
-                          onChange={(event) => onMarkChange(student.id, date.value, event.target.value)}
-                          disabled={savingCell === cellKey}
-                          aria-label={`${student.fullName}, ${date.label}`}
-                        >
-                          <option value="">—</option>
-                          {MARKS.map((mark) => (
-                            <option key={mark} value={mark}>
-                              {mark}
-                            </option>
-                          ))}
-                          <option value={ABSENT}>{ABSENT}</option>
-                        </select>
-                      ) : (
-                        <span className={`mark-cell mark-cell--${value || 'empty'}`}>{value || '—'}</span>
-                      )}
-                    </td>
-                  )
-                })}
-                <td className="grades__average-cell">
-                  {formatAverage(average(dates.map((date) => markOf(student.id, date.value))))}
-                </td>
-              </tr>
-            ))}
-            {!rows.length ? (
+      {/* ЛИСТ 2 — сам журнал: ученики в столбик, даты сверху */}
+      <section className="sheet">
+        <div className="grades__table-wrap">
+          <table className="grades__table">
+            <thead>
               <tr>
-                <td className="grades__empty" colSpan={dates.length + 2}>
-                  {loading ? 'Загружаем данные из базы…' : emptyText}
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-          <tfoot>
-            {[
-              ['Максимум', 'max'],
-              ['Минимум', 'min'],
-              ['Среднее по классу', 'avg']
-            ].map(([title, kind]) => (
-              <tr key={kind}>
-                <th className="grades__student-col" scope="row">
-                  {title}
+                <th className="grades__title" colSpan={dates.length + 1}>
+                  {selectedClass ? `${selectedClass.name} класс` : 'Класс не выбран'}
+                  {selectedSubject ? ` · ${selectedSubject.name}` : ' · все предметы'}
+                  {' · '}
+                  {weekTitle(weekOffset)}
                 </th>
-                {dates.map((date) => (
-                  <td key={date.value}>
-                    {kind === 'avg'
-                      ? formatAverage(columnStat(date.value, 'avg'))
-                      : columnStat(date.value, kind) ?? '—'}
-                  </td>
-                ))}
-                <td>{formatAverage(classAverage)}</td>
               </tr>
-            ))}
-          </tfoot>
-        </table>
-      </div>
+              <tr>
+                <th className="grades__student-col">Ученик</th>
+                {dates.map((date) => (
+                  <th key={date.value} className={date.isToday ? 'is-today' : ''}>
+                    <span className="grades__date">{date.label}</span>
+                    <span className="grades__weekday">{date.weekday}</span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((student) => (
+                <tr key={student.id}>
+                  <th className="grades__student-col" scope="row">
+                    {student.fullName}
+                  </th>
+                  {dates.map((date) => {
+                    const value = cellValueOf(student.id, date.value)
+                    const clickable = isTeacher && singleSubject
 
+                    return (
+                      <td key={date.value} className={date.isToday ? 'is-today' : ''}>
+                        {clickable ? (
+                          <button
+                            type="button"
+                            className={`mark-cell mark-cell--${value || 'empty'}`}
+                            onClick={() =>
+                              setCell({
+                                studentId: student.id,
+                                date: date.value,
+                                name: `${student.fullName} · ${date.label}`
+                              })
+                            }
+                            aria-label={`Отметка: ${student.fullName}, ${date.label}`}
+                          >
+                            {value || ''}
+                          </button>
+                        ) : (
+                          <span className={`mark-cell mark-cell--${value || 'empty'}`}>
+                            {value || ''}
+                          </span>
+                        )}
+                      </td>
+                    )
+                  })}
+                </tr>
+              ))}
+              {!rows.length ? (
+                <tr>
+                  <td className="grades__empty" colSpan={dates.length + 1}>
+                    {loading ? 'Загружаем данные из базы…' : emptyText}
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+
+        <p className="sheet__note">
+          Шкала 1–10 · «{ABSENT}» — не был на уроке (в средний балл не входит).{' '}
+          {isTeacher && singleSubject ? 'Нажмите на пустую клетку — откроется окно выбора.' : ''}
+        </p>
+      </section>
+
+      {/* ЛИСТ 3 — средние баллы ученика по предметам */}
+      {!isTeacher && subjectAverages.length ? (
+        <section className="sheet">
+          <h2 className="sheet__title">Средний балл по предметам</h2>
+          <p className="grades__legend">
+            {subjectAverages.map((row) => (
+              <span className="badge" key={row.subject_id}>
+                {row.subject_name}: {formatAverage(row.average)} ({row.grades_count})
+              </span>
+            ))}
+          </p>
+        </section>
+      ) : null}
+
+      {/* ЛИСТ 4 — перевод ученика в другой класс */}
       {isTeacher ? (
-        <section className="panel">
-          <h2 className="panel__title">Перевод ученика в другой класс</h2>
-          <p className="grades__hint">
-            Меняется только класс ученика: вход в систему, отметки и карточка остаются те же.
-            Ученик исчезнет из текущего списка и появится в новом классе.
+        <section className="sheet">
+          <h2 className="sheet__title">Перевод ученика в другой класс</h2>
+          <p className="sheet__note">
+            Меняется только класс ученика: вход, отметки и карточка остаются те же.
           </p>
 
-          <div className="grades__controls">
+          <div className="sheet__row">
             <label className="field field--compact">
               <span className="field__label">Ученик из класса {selectedClass?.name || '—'}</span>
               <select
@@ -498,40 +470,71 @@ export default function GradesScreen() {
             </button>
           </div>
 
-          {moveNotice ? (
+          {notice ? (
             <div className="alert alert--success" role="status">
-              {moveNotice}
+              {notice}
             </div>
           ) : null}
         </section>
       ) : null}
 
-      {!isTeacher && subjectAverages.length ? (
-        <div className="panel">
-          <h2 className="panel__title">Средний балл по предметам</h2>
-          <p className="grades__legend">
-            {subjectAverages.map((row) => (
-              <span className="badge" key={row.subject_id}>
-                {row.subject_name}: {formatAverage(row.average)} ({row.grades_count})
-              </span>
-            ))}
-          </p>
+      {/* Накладное окно выбора отметки */}
+      {cell ? (
+        <div
+          className="mark-dialog"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => (saving ? null : setCell(null))}
+        >
+          <div className="mark-dialog__card" onClick={(event) => event.stopPropagation()}>
+            <h3 className="mark-dialog__title">{cell.name}</h3>
+            <p className="mark-dialog__subject">{selectedSubject?.name || 'Все предметы'}</p>
+
+            <div className="mark-dialog__grid">
+              {MARKS.map((mark) => (
+                <button
+                  key={mark}
+                  type="button"
+                  className="mark-dialog__mark"
+                  onClick={() => applyMark(mark)}
+                  disabled={saving}
+                >
+                  {mark}
+                </button>
+              ))}
+            </div>
+
+            <div className="mark-dialog__actions">
+              <button
+                type="button"
+                className="button button--ghost button--small"
+                onClick={() => applyMark(ABSENT)}
+                disabled={saving}
+              >
+                {ABSENT} — не был
+              </button>
+              <button
+                type="button"
+                className="button button--ghost button--small"
+                onClick={() => applyMark('')}
+                disabled={saving}
+              >
+                Убрать отметку
+              </button>
+              <button
+                type="button"
+                className="button button--small"
+                onClick={() => setCell(null)}
+                disabled={saving}
+              >
+                Отмена
+              </button>
+            </div>
+
+            {saving ? <p className="sheet__note">Сохраняем…</p> : null}
+          </div>
         </div>
       ) : null}
-
-      {isTeacher ? (
-        <p className="grades__hint">
-          Выберите отметку прямо в клетке: от 10 до 1 или «{ABSENT}». Отметки сохраняются в базе
-          Supabase, поэтому ученик увидит их на своём устройстве. Средний балл считается
-          автоматически по числовым отметкам недели.
-        </p>
-      ) : (
-        <p className="grades__hint">
-          Отметки ставит учитель — здесь таблица только для просмотра. Данные читаются из базы,
-          поэтому обновление видно сразу после отметки учителя.
-        </p>
-      )}
     </div>
   )
 }
-

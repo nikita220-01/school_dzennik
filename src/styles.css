@@ -937,6 +937,122 @@ button.mark-cell {
   }
 }
 
+/* ===== «Лист» — отдельная секция экрана «Отметки» (как лист в Excel) ===== */
+.sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  background: #ffffff;
+}
+
+.sheet__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.sheet__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px;
+}
+
+.sheet__note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.grades__week {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--border);
+}
+
+/* ===== Накладное окно выбора отметки ===== */
+.mark-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.mark-dialog__card {
+  width: 100%;
+  max-width: 360px;
+  padding: 20px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  background: #ffffff;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+}
+
+.mark-dialog__title {
+  margin: 0 0 4px;
+  font-size: 17px;
+  color: var(--text);
+}
+
+.mark-dialog__subject {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.mark-dialog__grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+
+.mark-dialog__mark {
+  padding: 12px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mark-dialog__mark:hover:not(:disabled) {
+  background: var(--primary, #6366f1);
+  color: #ffffff;
+}
+
+.mark-dialog__mark:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.mark-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+@media (max-width: 560px) {
+  .mark-dialog__grid {
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+  }
+}
+
+@keyframes intro-pulse {
 @keyframes intro-pulse {
   from {
     transform: scale(1) rotate(0deg);
