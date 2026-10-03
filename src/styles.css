@@ -738,40 +738,58 @@ code {
 
 .grades__table-wrap {
   overflow-x: auto;
-  border: 2px solid #475569;
-  border-radius: var(--radius);
+  border: 1px solid #9c9c9c;
+  border-radius: 0;
   background: #ffffff;
 }
 
 .grades__table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
+  font-family: 'Segoe UI', Calibri, Arial, sans-serif;
+  font-size: 13px;
   background: #ffffff;
-  color: #0f172a;
+  color: #000000;
 }
 
 .grades__table th,
 .grades__table td {
-  padding: 8px 10px;
-  border: 1px solid #94a3b8;
+  padding: 3px 8px;
+  border: 1px solid #9c9c9c;
   text-align: center;
   background: #ffffff;
-  color: #0f172a;
+  color: #000000;
 }
 
+/* Заголовок таблицы как в Excel: светло-синяя заливка, чёрная рамка */
 .grades__table thead th {
   position: sticky;
   top: 0;
-  background: #e2e8f0;
-  color: #1e293b;
+  background: #dce6f1;
+  color: #000000;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.grades__title {
+  background: #dce6f1;
+  font-size: 15px;
   font-weight: 700;
+  padding: 6px 8px;
+}
+
+/* Итоговые строки снизу (Максимум / Минимум / Среднее) */
+.grades__table tfoot th,
+.grades__table tfoot td {
+  background: #f2f2f2;
+  font-weight: 600;
 }
 
 .grades__table tbody th,
-.grades__table .grades__student-col {
-  background: #ffffff;
-  color: #0f172a;
+.grades__table .grades__student-col,
+.grades__table .grades__average-cell {
+  background: #f2f2f2;
+  color: #000000;
 }
 
 .grades__table thead th.is-today,
@@ -781,7 +799,7 @@ code {
 
 .grades__date {
   display: block;
-  color: #0f172a;
+  color: #000000;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -789,17 +807,17 @@ code {
 .grades__weekday {
   display: block;
   font-size: 11px;
-  color: #475569;
+  color: #333333;
 }
 
 .grades__average-cell {
   font-weight: 700;
-  color: #4338ca;
+  color: #000000;
 }
 
 .grades__empty {
   padding: 22px;
-  color: #475569;
+  color: #333333;
 }
 
 .grades__hint {
@@ -808,13 +826,15 @@ code {
 }
 
 .mark-cell {
-  width: 62px;
-  padding: 5px 4px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: rgba(148, 163, 184, 0.1);
-  color: var(--text);
-  font-size: 14px;
+  width: 100%;
+  min-width: 58px;
+  padding: 2px 4px;
+  border: 1px solid #9c9c9c;
+  border-radius: 0;
+  background: #ffffff;
+  color: #000000;
+  font-family: inherit;
+  font-size: 13px;
   text-align: center;
   text-align-last: center;
 }

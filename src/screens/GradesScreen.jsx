@@ -171,6 +171,22 @@ export default function GradesScreen() {
   )
 
   const selectedClass = classes.find((item) => item.id === classId) || null
+  const selectedSubject = subjects.find((item) => item.id === subjectId) || null
+
+  // Числовые отметки колонки-дня (для строк «Максимум» / «Минимум» / «Среднее»)
+  const columnMarks = (date) =>
+    rows
+      .map((student) => markOf(student.id, date))
+      .filter((mark) => MARKS.includes(mark))
+      .map(Number)
+
+  const columnStat = (date, kind) => {
+    const numbers = columnMarks(date)
+    if (!numbers.length) return null
+    if (kind === 'max') return Math.max(...numbers)
+    if (kind === 'min') return Math.min(...numbers)
+    return average(numbers.map(String))
+  }
 
   const onMarkChange = async (studentId, date, value) => {
     if (!subjectId) return
@@ -338,6 +354,14 @@ export default function GradesScreen() {
         <table className="grades__table">
           <thead>
             <tr>
+              <th className="grades__title" colSpan={dates.length + 2}>
+                {selectedClass ? `${selectedClass.name} класс` : 'Класс не выбран'}
+                {selectedSubject ? ` · ${selectedSubject.name}` : ''}
+                {' · '}
+                {weekTitle(weekOffset)}
+              </th>
+            </tr>
+            <tr>
               <th className="grades__student-col">Ученик</th>
               {dates.map((date) => (
                 <th key={date.value} className={date.isToday ? 'is-today' : ''}>
@@ -395,6 +419,27 @@ export default function GradesScreen() {
               </tr>
             ) : null}
           </tbody>
+          <tfoot>
+            {[
+              ['Максимум', 'max'],
+              ['Минимум', 'min'],
+              ['Среднее по классу', 'avg']
+            ].map(([title, kind]) => (
+              <tr key={kind}>
+                <th className="grades__student-col" scope="row">
+                  {title}
+                </th>
+                {dates.map((date) => (
+                  <td key={date.value}>
+                    {kind === 'avg'
+                      ? formatAverage(columnStat(date.value, 'avg'))
+                      : columnStat(date.value, kind) ?? '—'}
+                  </td>
+                ))}
+                <td>{formatAverage(classAverage)}</td>
+              </tr>
+            ))}
+          </tfoot>
         </table>
       </div>
 
