@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useAuth } from '../context/AuthContext'
 import {
   ABSENT,
@@ -478,63 +479,71 @@ return (
         </section>
       ) : null}
 
-      {/* Накладное окно выбора отметки */}
-      {cell ? (
-        <div
-          className="mark-dialog"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => (saving ? null : setCell(null))}
-        >
-          <div className="mark-dialog__card" onClick={(event) => event.stopPropagation()}>
-            <h3 className="mark-dialog__title">{cell.name}</h3>
-            <p className="mark-dialog__subject">{selectedSubject?.name || 'Все предметы'}</p>
-
-            <div className="mark-dialog__grid">
-              {MARKS.map((mark) => (
-                <button
-                  key={mark}
-                  type="button"
-                  className="mark-dialog__mark"
-                  onClick={() => applyMark(mark)}
-                  disabled={saving}
-                >
-                  {mark}
-                </button>
-              ))}
-            </div>
-
-            <div className="mark-dialog__actions">
-              <button
-                type="button"
-                className="button button--ghost button--small"
-                onClick={() => applyMark(ABSENT)}
-                disabled={saving}
+      {/* Накладное окно выбора отметки — portal в body, чтобы быть поверх всего */}
+      {cell
+        ? createPortal(
+            <div
+              className="mark-dialog"
+              role="dialog"
+              aria-modal="true"
+              onClick={() => (saving ? null : setCell(null))}
+            >
+              <div
+                className="mark-dialog__card"
+                onClick={(event) => event.stopPropagation()}
               >
-                {ABSENT} — не был
-              </button>
-              <button
-                type="button"
-                className="button button--ghost button--small"
-                onClick={() => applyMark('')}
-                disabled={saving}
-              >
-                Убрать отметку
-              </button>
-              <button
-                type="button"
-                className="button button--small"
-                onClick={() => setCell(null)}
-                disabled={saving}
-              >
-                Отмена
-              </button>
-            </div>
+                <h3 className="mark-dialog__title">{cell.name}</h3>
+                <p className="mark-dialog__subject">
+                  {selectedSubject?.name || 'Все предметы'}
+                </p>
 
-            {saving ? <p className="sheet__note">Сохраняем…</p> : null}
-          </div>
-        </div>
-      ) : null}
+                <div className="mark-dialog__grid">
+                  {MARKS.map((mark) => (
+                    <button
+                      key={mark}
+                      type="button"
+                      className="mark-dialog__mark"
+                      onClick={() => applyMark(mark)}
+                      disabled={saving}
+                    >
+                      {mark}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mark-dialog__actions">
+                  <button
+                    type="button"
+                    className="button button--ghost button--small"
+                    onClick={() => applyMark(ABSENT)}
+                    disabled={saving}
+                  >
+                    {ABSENT} — не был
+                  </button>
+                  <button
+                    type="button"
+                    className="button button--ghost button--small"
+                    onClick={() => applyMark('')}
+                    disabled={saving}
+                  >
+                    Убрать отметку
+                  </button>
+                  <button
+                    type="button"
+                    className="button button--small"
+                    onClick={() => setCell(null)}
+                    disabled={saving}
+                  >
+                    Отмена
+                  </button>
+                </div>
+
+                {saving ? <p className="sheet__note">Сохраняем…</p> : null}
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   )
 }
