@@ -49,6 +49,8 @@ export default function GradesScreen() {
   const [saving, setSaving] = useState(false)
   /** Открытая клетка: { studentId, date, name } — накладное окно выбора отметки */
   const [cell, setCell] = useState(null)
+  /** Отметка, выбранная в окне; применяется кнопкой «ОК» */
+  const [selectedMark, setSelectedMark] = useState('')
   const [moveStudentId, setMoveStudentId] = useState('')
   const [moveClassId, setMoveClassId] = useState('')
   const [moving, setMoving] = useState(false)
@@ -58,6 +60,39 @@ export default function GradesScreen() {
   const weekFrom = dates[0].value
   const weekTo = dates[dates.length - 1].value
   const singleSubject = subjectId !== ALL_SUBJECTS
+
+  /** Месяцы над сеткой дней: один общий заголовок на каждый месяц недели */
+  const monthGroups = useMemo(() => {
+    const monthNames = [
+      'Январь',
+      'Февраль',
+      'Март',
+      'Апрель',
+      'Май',
+      'Июнь',
+      'Июль',
+      'Август',
+      'Сентябрь',
+      'Октябрь',
+      'Ноябрь',
+      'Декабрь'
+    ]
+    const groups = []
+    for (const date of dates) {
+      const monthNumber = Number(date.label.split('.')[1])
+      const last = groups[groups.length - 1]
+      if (last && last.monthNumber === monthNumber) {
+        last.count += 1
+      } else {
+        groups.push({ monthNumber, count: 1 })
+      }
+    }
+    return groups.map((group) => ({
+      ...group,
+      key: `m-${group.monthNumber}`,
+      name: monthNames[group.monthNumber - 1] || ''
+    }))
+  }, [dates])
 
   // 1. Справочники: классы (3А…11Г) и предметы
   useEffect(() => {
@@ -356,7 +391,8 @@ return (
                   </th>
                   {dates.map((date) => {
                     const value = cellValueOf(student.id, date.value)
-                    const clickable = isTeacher && singleSubject
+                    /* Ставить и менять отметки может только учитель */
+                    const clickable = isTeacher
 
                     return (
                       <td key={date.value} className={date.isToday ? 'is-today' : ''}>
@@ -364,13 +400,14 @@ return (
                           <button
                             type="button"
                             className={`mark-cell mark-cell--${value || 'empty'}`}
-                            onClick={() =>
+                            onClick={() => {
+                              setSelectedMark(markOf(student.id, date.value) || '')
                               setCell({
                                 studentId: student.id,
                                 date: date.value,
                                 name: `${student.fullName} · ${date.label}`
                               })
-                            }
+                            }}
                             aria-label={`Отметка: ${student.fullName}, ${date.label}`}
                           >
                             {value || ''}
@@ -398,7 +435,7 @@ return (
 
         <p className="sheet__note">
           Шкала 1–10 · «{ABSENT}» — не был на уроке (в средний балл не входит).{' '}
-          {isTeacher && singleSubject ? 'Нажмите на пустую клетку — откроется окно выбора.' : ''}
+          {isTeacher ? 'Нажмите на клетку — откроется окно выбора отметки.' : ''}
         </p>
       </section>
 
@@ -479,7 +516,7 @@ return (
         </section>
       ) : null}
 
-      {/* Накладное окно выбора отметки — portal в body, чтобы быть поверх всего */}
+      {/* Накладное окно выбора отметки — затемнение экрана, окно поверх всего */}
       {cell
         ? createPortal(
             <div
@@ -497,46 +534,95 @@ return (
                   {selectedSubject?.name || 'Все предметы'}
                 </p>
 
-                <div className="mark-dialog__grid">
-                  {MARKS.map((mark) => (
-                    <button
-                      key={mark}
-                      type="button"
-                      className="mark-dialog__mark"
-                      onClick={() => applyMark(mark)}
-                      disabled={saving}
-                    >
-                      {mark}
-                    </button>
-                  ))}
-                </div>
+                {/* Режим «Все предметы»: сначала выбираем предмет, потом отметку */}
+                {!singleSubject ? (
+                  <>
+                    <p className="mark-dialog__pick">Выберите предмет отметки:</p>
+                    <div className="mark-dialog__subjects">
+                      {subjects.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className="mark-dialog__mark"
+                          onClick={() => setSubjectId(item.id)}
+                          disabled={saving}
+                        >
+                          {item.name}
+                        </button>
+                      ))}
+                    </div>
 
-                <div className="mark-dialog__actions">
-                  <button
-                    type="button"
-                    className="button button--ghost button--small"
-                    onClick={() => applyMark(ABSENT)}
-                    disabled={saving}
-                  >
-                    {ABSENT} — не был
-                  </button>
-                  <button
-                    type="button"
-                    className="button button--ghost button--small"
-                    onClick={() => applyMark('')}
-                    disabled={saving}
-                  >
-                    Убрать отметку
-                  </button>
-                  <button
-                    type="button"
-                    className="button button--small"
-                    onClick={() => setCell(null)}
-                    disabled={saving}
-                  >
-                    Отмена
-                  </button>
-                </div>
+                    <div className="mark-dialog__actions">
+                      <button
+                        type="button"
+                        className="button button--small"
+                        onClick={() => setCell(null)}
+                        disabled={saving}
+                      >
+                        Отмена
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="mark-dialog__pick">
+                      Отметка: <strong>{selectedMark || '—'}</strong>
+                    </p>
+
+                    <div className="mark-dialog__grid">
+                      {MARKS.map((mark) => (
+                        <button
+                          key={mark}
+                          type="button"
+                          className={`mark-dialog__mark${
+                            selectedMark === mark ? ' is-active' : ''
+                          }`}
+                          onClick={() => setSelectedMark(mark)}
+                          disabled={saving}
+                        >
+                          {mark}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="mark-dialog__actions">
+                      <button
+                        type="button"
+                        className="button button--primary"
+                        onClick={() => applyMark(selectedMark)}
+                        disabled={saving || !selectedMark}
+                      >
+                        ОК
+                      </button>
+                      <button
+                        type="button"
+                        className="button button--ghost button--small"
+                        onClick={() => applyMark(ABSENT)}
+                        disabled={saving}
+                      >
+                        {ABSENT} — не был
+                      </button>
+                      {cellValueOf(cell.studentId, cell.date) ? (
+                        <button
+                          type="button"
+                          className="button button--ghost button--small"
+                          onClick={() => applyMark('')}
+                          disabled={saving}
+                        >
+                          Убрать отметку
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="button button--small"
+                        onClick={() => setCell(null)}
+                        disabled={saving}
+                      >
+                        Отмена
+                      </button>
+                    </div>
+                  </>
+                )}
 
                 {saving ? <p className="sheet__note">Сохраняем…</p> : null}
               </div>

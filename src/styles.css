@@ -663,6 +663,9 @@ code {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
 /* ============================== Отметки ==================================== */
 
 .tabs--screens {
@@ -684,28 +687,33 @@ code {
   font-size: 12px;
 }
 
+/* Зона «Отметки»: одна рамка — у белого «листа» .sheet; заголовок над ним */
 .grades {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  /* Отдельная рамка для зоны «Отметки» — она не сливается с остальной страницей */
-  padding: 18px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: rgba(20, 27, 51, 0.66);
-}
+  gap: 12px;
 }
 
+/* Заголовок экрана — над «листом», как в журнале дежурств */
+.grades__heading {
+  margin: 0;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* Компактная строка управления внутри «листа» — над таблицей */
 .grades__controls {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 14px;
-  padding: 16px;
-  margin-bottom: 18px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--panel);
+  padding: 14px 16px 0;
+  margin-bottom: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
 }
 
 .grades__controls .field--compact {
@@ -748,21 +756,22 @@ code {
   margin-left: auto;
 }
 
-/* Отдельный «лист» с отметками: белая страница, отделённая от остальной страницы */
+/* Таблица-журнал: тонкие серые линии сетки и тёмная кромка — как в журнале дежурств */
 .grades__table-wrap {
   overflow: auto;
   max-height: 68vh;
-  margin: 22px 0 34px;
-  padding: 10px 10px 14px;
-  border: 1px solid #9c9c9c;
-  border-radius: 4px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
   background: #ffffff;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  box-shadow: none;
 }
 
 .grades__table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-family: 'Segoe UI', Calibri, Arial, sans-serif;
   font-size: 13px;
   background: #ffffff;
@@ -771,26 +780,50 @@ code {
 
 .grades__table th,
 .grades__table td {
-  padding: 5px 12px;
-  border: 1px solid #9c9c9c;
+  padding: 5px 10px;
+  border-right: 1px solid #9ca3af;
+  border-bottom: 1px solid #9ca3af;
   text-align: center;
   background: #ffffff;
   color: #000000;
-  min-width: 74px;
+  min-width: 54px;
 }
 
-/* Колонка с именем ученика — шире остальных */
+/* Узкая колонка номеров — слева */
+.grades__table .grades__num {
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  font-weight: 600;
+  color: #333333;
+}
+
+/* Широкая колонка ФИО */
 .grades__table .grades__student-col {
-  min-width: 190px;
+  min-width: 240px;
+  text-align: left;
+  font-weight: 600;
 }
 
-/* Заголовок таблицы как в Excel: светло-синяя заливка, чёрная рамка */
-.grades__table thead th {
+/* Подпись «Месяц / Число» между ФИО и сеткой дней */
+.grades__table .grades__period {
+  min-width: 74px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* Шапка: белая, полужирная; первая строка — месяцы, вторая — дни недели */
+.grades__table thead {
   position: sticky;
   top: 0;
-  background: #dce6f1;
+  z-index: 2;
+}
+
+.grades__table thead th {
+  background: #ffffff;
   color: #000000;
-  font-weight: 600;
+  font-weight: 700;
   vertical-align: middle;
 }
 
@@ -808,10 +841,11 @@ code {
   font-weight: 600;
 }
 
+/* Тело таблицы белое, как в журнале; строка ученика — без серой заливки */
 .grades__table tbody th,
 .grades__table .grades__student-col,
 .grades__table .grades__average-cell {
-  background: #f2f2f2;
+  background: #ffffff;
   color: #000000;
 }
 
@@ -853,6 +887,7 @@ code {
 }
 
 .mark-cell {
+  display: block;
   width: 100%;
   min-width: 58px;
   padding: 2px 4px;
@@ -944,12 +979,13 @@ button.mark-cell {
 }
 
 /* ===== «Лист» — отдельная секция экрана «Отметки» (как лист в Excel) ===== */
+/* Единственная рамка экрана — сам «лист»: белая страница с толстой тёмной кромкой */
 .sheet {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 18px;
-  border: 2px solid var(--border);
+  padding: 0;
+  border: 3px solid #111827;
   border-radius: var(--radius);
   background: #ffffff;
 }
@@ -972,6 +1008,11 @@ button.mark-cell {
   margin: 0;
   font-size: 13px;
   color: #475569; /* лист белый — примечание серо-тёмное */
+}
+
+/* Примечание-заполнитель прямо на «листе» (без полей) — с отступами от кромки */
+.sheet > .sheet__note {
+  padding: 16px;
 }
 
 /* На белом листе подписи полей должны быть тёмными */
@@ -1081,6 +1122,38 @@ button.mark-cell {
   margin-top: 16px;
 }
 
+/* Выбранная в списке отметка подсвечена */
+.mark-dialog__mark.is-active {
+  background: var(--primary, #6366f1);
+  border-color: var(--primary, #6366f1);
+  color: #ffffff;
+}
+
+/* Строка «Отметка: …» и список предметов (режим «Все предметы») */
+.mark-dialog__pick {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.mark-dialog__subjects {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+/* Кнопка «ОК» — основная, фиолетовая даже внутри белой карточки */
+.mark-dialog__card .button--primary {
+  color: #ffffff;
+  border-color: var(--primary, #6366f1);
+  background: var(--primary, #6366f1);
+}
+
+/* Клетка журнала, по которой можно ставить отметку, — с курсором-рукой */
+button.mark-cell {
+  cursor: pointer;
+}
+
 @media (max-width: 560px) {
   .mark-dialog__grid {
     grid-template-columns: repeat(5, 1fr);
@@ -1088,7 +1161,6 @@ button.mark-cell {
   }
 }
 
-@keyframes intro-pulse {
 @keyframes intro-pulse {
   from {
     transform: scale(1) rotate(0deg);
