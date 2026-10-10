@@ -144,7 +144,7 @@ export function markKey(studentId, date) {
  */
 export async function loadWeekMarks({ studentIds, subjectId, classId, from, to }) {
   const empty = { marks: {}, absences: {} }
-  if (!studentIds?.length || !classId) return empty
+  if (!studentIds?.length) return empty
 
   const allSubjects = subjectId === 'ALL' || !subjectId
 
@@ -158,17 +158,19 @@ export async function loadWeekMarks({ studentIds, subjectId, classId, from, to }
 
   if (!allSubjects) gradesQuery = gradesQuery.eq('subject_id', subjectId)
 
-  const [grades, attendance] = await Promise.all([
-    gradesQuery,
-    supabase
-      .from('attendance')
-      .select('student_id, attend_date, status')
-      .eq('class_id', classId)
-      .in('student_id', studentIds)
-      .in('status', ABSENCE_STATUSES)
-      .gte('attend_date', from)
-      .lte('attend_date', to)
-  ])
+  // Посещаемость: если класс не задан (например родитель с детьми из разных
+  // классов), фильтруем только по ученикам — видимые строки ограничит RLS.
+  let attendanceQuery = supabase
+    .from('attendance')
+    .select('student_id, attend_date, status')
+    .in('student_id', studentIds)
+    .in('status', ABSENCE_STATUSES)
+    .gte('attend_date', from)
+    .lte('attend_date', to)
+
+  if (classId) attendanceQuery = attendanceQuery.eq('class_id', classId)
+
+  const [grades, attendance] = await Promise.all([gradesQuery, attendanceQuery])
 
   if (grades.error) throw new Error(`Не удалось загрузить отметки: ${translateDbError(grades.error)}`)
   if (attendance.error) {

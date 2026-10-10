@@ -10,6 +10,7 @@ import {
   formatAverage,
   loadClasses,
   loadDateRemarks,
+  loadMyChildren,
   loadRoster,
   loadSubjectAverages,
   loadSubjects,
@@ -33,8 +34,9 @@ const ALL_SUBJECTS = 'ALL'
  *  3) клетки пустые: учитель нажимает клетку и в отдельном окне выбирает отметку.
  */
 export default function GradesScreen() {
-  const { role, profile, enrollment, classId: myClassId } = useAuth()
+  const { role, profile, user, enrollment, classId: myClassId } = useAuth()
   const isTeacher = role === 'teacher' || role === 'admin'
+  const isParent = role === 'parent'
   const teacherId = profile?.id || null
   const myStudentId = enrollment?.studentId || null
 
@@ -44,6 +46,8 @@ export default function GradesScreen() {
   const [subjectId, setSubjectId] = useState(ALL_SUBJECTS)
   const [weekOffset, setWeekOffset] = useState(0)
   const [roster, setRoster] = useState([])
+  /** Дети родителя (для роли «родитель»): [{ id, classId, fullName, cardNumber }] */
+  const [children, setChildren] = useState([])
   const [marks, setMarks] = useState({})
   const [absences, setAbsences] = useState({})
   const [subjectAverages, setSubjectAverages] = useState([])
@@ -134,8 +138,71 @@ export default function GradesScreen() {
     if (!isTeacher && myClassId) setClassId(myClassId)
   }, [isTeacher, myClassId])
 
+  // Родитель: подгружаем привязанных детей (по parent_students) и берём класс
+  // первого ребёнка — для заголовка. Сами отметки грузятся по id детей.
+  useEffect(() => {
+    let alive = true
+    if (!isParent || !user?.id) {
+      setChildren([])
+      return () => {
+        alive = false
+      }
+    }
+    loadMyChildren(user.id)
+      .then((rows) => {
+        if (!alive) return
+        setChildren(rows)
+        if (rows[0]?.classId) setClassId(rows[0].classId)
+      })
+      .catch((loadError) => {
+        if (alive) {
+          setError(loadError.message)
+          setChildren([])
+        }
+      })
+    return () => {
+      alive = false
+    }
+  }, [isParent, user?.id])
+
   // 2. Список класса и отметки недели
   const loadWeek = useCallback(async () => {
+    // Родитель: показываем отметки привязанных детей — код класса не нужен.
+    // Отметки и пропуски грузим по id детей, класс не фильтруем (дети могут
+    // быть из разных классов; видимые строки ограничит RLS).
+    if (isParent) {
+      const studentIds = children.map((child) => child.id)
+      setLoading(true)
+      setError(null)
+      try {
+        if (!studentIds.length) {
+          setMarks({})
+          setAbsences({})
+          setRemarks([])
+          setLoading(false)
+          return
+        }
+        const week = await loadWeekMarks({
+          studentIds,
+          subjectId,
+          classId: null,
+          from: weekFrom,
+          to: weekTo
+        })
+        setMarks(week.marks)
+        setAbsences(week.absences)
+        setRemarks([])
+      } catch (loadError) {
+        setError(loadError.message)
+        setMarks({})
+        setAbsences({})
+        setRemarks([])
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
+
     if (!classId) {
       setRoster([])
       setMarks({})
@@ -178,7 +245,7 @@ export default function GradesScreen() {
     } finally {
       setLoading(false)
     }
-  }, [classId, subjectId, weekFrom, weekTo, isTeacher, myStudentId])
+  }, [classId, subjectId, weekFrom, weekTo, isTeacher, myStudentId, isParent, children])
 
   useEffect(() => {
     loadWeek()
@@ -187,7 +254,41 @@ export default function GradesScreen() {
   useEffect(() => {
     let alive = true
 
-    if (isTeacher || !myStudentId) {
+    if (isTeacher) {
+      setSubjectAverages([])
+      return () => {
+        alive = false
+      }
+    }
+
+    // Родитель: средний балл по каждому ребёнку (предмет помечаем именем ребёнка)
+    if (isParent) {
+      if (!children.length) {
+        setSubjectAverages([])
+        return () => {
+          alive = false
+        }
+      }
+      const run = async () => {
+        try {
+          const perChild = await Promise.all(
+            children.map(async (child) => {
+              const childRows = await loadSubjectAverages(child.id)
+              return childRows.map((row) => ({ ...row, student_name: child.fullName }))
+            })
+          )
+          if (alive) setSubjectAverages(perChild.flat())
+        } catch (loadError) {
+          if (alive) setError(loadError.message)
+        }
+      }
+      run()
+      return () => {
+        alive = false
+      }
+    }
+
+    if (!myStudentId) {
       setSubjectAverages([])
       return () => {
         alive = false
@@ -207,7 +308,7 @@ export default function GradesScreen() {
     return () => {
       alive = false
     }
-  }, [isTeacher, myStudentId])
+  }, [isTeacher, isParent, children, myStudentId])
 
   // 4. Значение клетки: отметка важнее пропуска дня
   const markOf = (studentId, date) => marks[markKey(studentId, date)] || ''
@@ -216,9 +317,10 @@ export default function GradesScreen() {
 
   const rows = useMemo(() => {
     if (isTeacher) return roster
+    if (isParent) return children
     if (!myStudentId) return []
     return roster.filter((student) => student.id === myStudentId)
-  }, [isTeacher, roster, myStudentId])
+  }, [isTeacher, isParent, roster, children, myStudentId])
 
   const selectedClass = classes.find((item) => item.id === classId) || null
   const selectedSubject = subjects.find((item) => item.id === subjectId) || null
@@ -347,9 +449,13 @@ export default function GradesScreen() {
       ? `В классе ${selectedClass?.name || ''} нет учеников${
           selectedClass?.invite_code ? `. Код класса для учеников: ${selectedClass.invite_code}` : ''
         }`
-      : myStudentId
-        ? 'За эту неделю отметок нет'
-        : 'Вы ещё не в классе: введите код класса на главной странице'
+      : isParent
+        ? children.length
+          ? 'За эту неделю отметок нет'
+          : 'Нет привязанных детей. Привяжите ребёнка по номеру карты или ID на вкладке «Посещаемость».'
+        : myStudentId
+          ? 'За эту неделю отметок нет'
+          : 'Вы ещё не в классе: введите код класса на главной странице'
 return (
     <div className="grades">
       {/* ЛИСТ 1 — обрамление с выбором класса и предмета */}
@@ -514,7 +620,8 @@ return (
           <h2 className="sheet__title">Средний балл по предметам</h2>
           <p className="grades__legend">
             {subjectAverages.map((row) => (
-              <span className="badge" key={row.subject_id}>
+              <span className="badge" key={`${row.student_name || 'me'}-${row.subject_id}`}>
+                {row.student_name ? `${row.student_name}: ` : ''}
                 {row.subject_name}: {formatAverage(row.average)} ({row.grades_count})
               </span>
             ))}
