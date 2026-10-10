@@ -4,9 +4,12 @@ import { useAuth } from '../context/AuthContext'
 import {
   ABSENT,
   MARKS,
+  addDateRemark,
   clearCell,
+  deleteDateRemark,
   formatAverage,
   loadClasses,
+  loadDateRemarks,
   loadRoster,
   loadSubjectAverages,
   loadSubjects,
@@ -55,6 +58,13 @@ export default function GradesScreen() {
   const [moveClassId, setMoveClassId] = useState('')
   const [moving, setMoving] = useState(false)
   const [notice, setNotice] = useState(null)
+  /** Замечания по датам текущей недели: { id, remark_date, remark, request } */
+  const [remarks, setRemarks] = useState([])
+  const [remarkDate, setRemarkDate] = useState('')
+  const [remarkText, setRemarkText] = useState('')
+  const [requestText, setRequestText] = useState('')
+  const [remarkBusy, setRemarkBusy] = useState(false)
+  const [remarkNotice, setRemarkNotice] = useState(null)
 
   const dates = useMemo(() => weekDates(weekOffset), [weekOffset])
   const weekFrom = dates[0].value
@@ -130,6 +140,7 @@ export default function GradesScreen() {
       setRoster([])
       setMarks({})
       setAbsences({})
+      setRemarks([])
       setLoading(false)
       return
     }
@@ -155,11 +166,15 @@ export default function GradesScreen() {
 
       setMarks(week.marks)
       setAbsences(week.absences)
+
+      const remarkRows = await loadDateRemarks({ classId, from: weekFrom, to: weekTo })
+      setRemarks(remarkRows)
     } catch (loadError) {
       setError(loadError.message)
       setRoster([])
       setMarks({})
       setAbsences({})
+      setRemarks([])
     } finally {
       setLoading(false)
     }
@@ -249,6 +264,60 @@ export default function GradesScreen() {
       loadWeek()
     } finally {
       setSaving(false)
+    }
+  }
+
+  /** Учитель добавляет замечание по дате (дата — замечание — просьба) */
+  const handleAddRemark = async (event) => {
+    event.preventDefault()
+    if (remarkBusy) return
+
+    if (!classId || !remarkDate) {
+      setRemarkNotice('Выберите дату для замечания')
+      return
+    }
+    if (!remarkText.trim()) {
+      setRemarkNotice('Напишите текст замечания')
+      return
+    }
+
+    setRemarkBusy(true)
+    setRemarkNotice(null)
+
+    try {
+      await addDateRemark({
+        classId,
+        remarkDate,
+        remark: remarkText,
+        request: requestText,
+        createdBy: profile?.id || null
+      })
+      setRemarkDate('')
+      setRemarkText('')
+      setRequestText('')
+      await loadWeek()
+      setRemarkNotice('Замечание добавлено.')
+    } catch (addError) {
+      setRemarkNotice(addError.message)
+    } finally {
+      setRemarkBusy(false)
+    }
+  }
+
+  /** Учитель удаляет замечание */
+  const handleDeleteRemark = async (remarkId) => {
+    if (remarkBusy) return
+
+    setRemarkBusy(true)
+    setRemarkNotice(null)
+
+    try {
+      await deleteDateRemark(remarkId)
+      await loadWeek()
+    } catch (deleteError) {
+      setRemarkNotice(deleteError.message)
+    } finally {
+      setRemarkBusy(false)
     }
   }
 
@@ -515,6 +584,119 @@ return (
           ) : null}
         </section>
       ) : null}
+
+      {/* Нижний блок: замечания по датам — дата — замечание — просьба */}
+      <section className="sheet remarks">
+        <h2 className="remarks__title">Замечания по датам</h2>
+
+        {isTeacher ? (
+          <form className="remarks__form" onSubmit={handleAddRemark}>
+            <label className="field field--compact">
+              <span className="field__label">Дата</span>
+              <select
+                className="field__input"
+                value={remarkDate}
+                onChange={(event) => setRemarkDate(event.target.value)}
+                disabled={remarkBusy}
+              >
+                <option value="">— выберите дату —</option>
+                {dates.map((date) => (
+                  <option key={date.value} value={date.value}>
+                    {date.label} ({date.weekday})
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field field--compact">
+              <span className="field__label">Замечание</span>
+              <input
+                className="field__input"
+                type="text"
+                placeholder="Например: урок сорвался"
+                value={remarkText}
+                onChange={(event) => setRemarkText(event.target.value)}
+                disabled={remarkBusy}
+              />
+            </label>
+
+            <label className="field field--compact">
+              <span className="field__label">Просьба</span>
+              <input
+                className="field__input"
+                type="text"
+                placeholder="Например: перенести на пятницу"
+                value={requestText}
+                onChange={(event) => setRequestText(event.target.value)}
+                disabled={remarkBusy}
+              />
+            </label>
+
+            <button className="button button--primary" type="submit" disabled={remarkBusy}>
+              {remarkBusy ? 'Сохраняем…' : 'Добавить'}
+            </button>
+          </form>
+        ) : null}
+
+        {remarkNotice ? (
+          <div
+            className={`alert remarks__notice ${
+              remarkNotice === 'Замечание добавлено.' ? 'alert--success' : 'alert--error'
+            }`}
+            role="status"
+          >
+            {remarkNotice}
+          </div>
+        ) : null}
+
+        <div className="grades__table-wrap">
+          <table className="grades__table remarks__table">
+            <thead>
+              <tr>
+                <th className="remarks__date">Дата</th>
+                <th>Замечание</th>
+                <th>Просьба</th>
+                {isTeacher ? <th className="remarks__del">—</th> : null}
+              </tr>
+            </thead>
+            <tbody>
+              {remarks.length ? (
+                remarks.map((item) => (
+                  <tr key={item.id}>
+                    <td className="remarks__date">
+                      {String(item.remark_date)
+                        .split('-')
+                        .reverse()
+                        .join('.')}
+                    </td>
+                    <td className="remarks__text">{item.remark}</td>
+                    <td className="remarks__text">{item.request}</td>
+                    {isTeacher ? (
+                      <td className="remarks__del">
+                        <button
+                          type="button"
+                          className="button button--small button--ghost"
+                          onClick={() => handleDeleteRemark(item.id)}
+                          disabled={remarkBusy}
+                          aria-label="Удалить замечание"
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    ) : null}
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td className="grades__empty" colSpan={isTeacher ? 4 : 3}>
+                    Здесь пусто
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       {/* Накладное окно выбора отметки — затемнение экрана, окно поверх всего */}
       {cell

@@ -270,6 +270,50 @@ export async function clearCell({ studentId, subjectId, date }) {
   if (error) throw new Error(`Не удалось очистить клетку: ${translateDbError(error)}`)
 }
 
+/* ------------------------------------------------------------------ */
+/*  Замечания по датам (дата — замечание — просьба)                    */
+/* ------------------------------------------------------------------ */
+
+/** Замечания по датам класса за период (для текущей недели журнала) */
+export async function loadDateRemarks({ classId, from, to }) {
+  return load(
+    supabase
+      .from('date_remarks')
+      .select('id, remark_date, remark, request, created_by, created_at')
+      .eq('class_id', classId)
+      .gte('remark_date', from)
+      .lte('remark_date', to)
+      .order('remark_date', { ascending: true })
+      .order('created_at', { ascending: true }),
+    'Не удалось загрузить замечания по датам'
+  )
+}
+
+/** Учитель добавляет замечание: дата, текст замечания, просьба */
+export async function addDateRemark({ classId, remarkDate, remark, request, createdBy }) {
+  const { data, error } = await supabase
+    .from('date_remarks')
+    .insert({
+      class_id: classId,
+      remark_date: remarkDate,
+      remark: remark.trim(),
+      request: (request || '').trim(),
+      created_by: createdBy || null
+    })
+    .select('id, remark_date, remark, request, created_by, created_at')
+    .single()
+
+  if (error) throw new Error(`Не удалось добавить замечание: ${translateDbError(error)}`)
+  return data
+}
+
+/** Учитель удаляет замечание */
+export async function deleteDateRemark(remarkId) {
+  const { error } = await supabase.from('date_remarks').delete().eq('id', remarkId)
+
+  if (error) throw new Error(`Не удалось удалить замечание: ${translateDbError(error)}`)
+}
+
 /** Учитель (или админ) переводит ученика в другой класс: меняется только students.class_id */
 export async function moveStudentToClass({ studentId, classId }) {
   if (!studentId || !classId) throw new Error('Выберите ученика и новый класс')
@@ -292,6 +336,186 @@ export async function joinClass(code) {
   const { data, error } = await supabase.rpc('join_class', { p_invite_code: trimmed })
   if (error) throw new Error(translateDbError(error))
   return data
+}
+
+/* ------------------------------------------------------------------ */
+/*  Расписание классов (день недели — урок — предмет)                 */
+/* ------------------------------------------------------------------ */
+
+/** Дни учебной недели: индекс массива + 1 = weekday в базе (1 = Понедельник) */
+export const WEEKDAY_NAMES = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']
+
+/** Расписание класса: строки { id, weekday, lesson_number, subject_id } */
+export async function loadSchedule(classId) {
+  return load(
+    supabase
+      .from('class_schedules')
+      .select('id, weekday, lesson_number, subject_id')
+      .eq('class_id', classId)
+      .order('weekday', { ascending: true })
+      .order('lesson_number', { ascending: true }),
+    'Не удалось загрузить расписание'
+  )
+}
+
+/** Учитель ставит или меняет предмет в клетке (день + номер урока) */
+export async function saveScheduleSlot({ classId, weekday, lessonNumber, subjectId }) {
+  const { error } = await supabase.from('class_schedules').upsert(
+    {
+      class_id: classId,
+      weekday,
+      lesson_number: lessonNumber,
+      subject_id: subjectId,
+      updated_at: new Date().toISOString()
+    },
+    { onConflict: 'class_id,weekday,lesson_number' }
+  )
+
+  if (error) throw new Error(`Не удалось сохранить расписание: ${translateDbError(error)}`)
+}
+
+/** Учитель убирает предмет из клетки расписания */
+export async function clearScheduleSlot(scheduleId) {
+  const { error } = await supabase.from('class_schedules').delete().eq('id', scheduleId)
+
+  if (error) throw new Error(`Не удалось убрать предмет из расписания: ${translateDbError(error)}`)
+}
+
+/* ------------------------------------------------------------------ */
+/*  Домашнее задание (класс — предмет — дата — текст)                 */
+/* ------------------------------------------------------------------ */
+
+/** Задания класса по предмету за период недели */
+export async function loadHomework({ classId, subjectId, from, to }) {
+  return load(
+    supabase
+      .from('day_homework')
+      .select('id, homework_date, text')
+      .eq('class_id', classId)
+      .eq('subject_id', subjectId)
+      .gte('homework_date', from)
+      .lte('homework_date', to)
+      .order('homework_date', { ascending: true }),
+    'Не удалось загрузить домашнее задание'
+  )
+}
+
+/** Учитель пишет задание в клетку дня (upsert: одна строка на класс+предмет+дату) */
+export async function saveHomework({ classId, subjectId, date, text }) {
+  const { error } = await supabase.from('day_homework').upsert(
+    {
+      class_id: classId,
+      subject_id: subjectId,
+      homework_date: date,
+      text: text.trim(),
+      updated_at: new Date().toISOString()
+    },
+    { onConflict: 'class_id,subject_id,homework_date' }
+  )
+
+  if (error) throw new Error(`Не удалось сохранить задание: ${translateDbError(error)}`)
+}
+
+/** Учитель очищает клетку дня (удаляет задание предмета на эту дату) */
+export async function clearHomework({ classId, subjectId, date }) {
+  const { error } = await supabase
+    .from('day_homework')
+    .delete()
+    .eq('class_id', classId)
+    .eq('subject_id', subjectId)
+    .eq('homework_date', date)
+
+  if (error) throw new Error(`Не удалось очистить задание: ${translateDbError(error)}`)
+}
+
+/* ------------------------------------------------------------------ */
+/*  Посещаемость: причины отсутствия (заполняют родители)              */
+/* ------------------------------------------------------------------ */
+
+/** Дети текущего родителя: [{ id, classId, fullName, cardNumber }] */
+export async function loadMyChildren(parentId) {
+  const rows = await load(
+    supabase
+      .from('parent_students')
+      .select(
+        'student_id, students ( id, class_id, card_number, profiles ( full_name ) )'
+      )
+      .eq('parent_id', parentId),
+    'Не удалось загрузить детей'
+  )
+
+  return rows
+    .map((row) => {
+      const student = row.students
+      if (!student) return null
+      return {
+        id: student.id,
+        classId: student.class_id,
+        fullName: student.profiles?.full_name || 'Ученик',
+        cardNumber: student.card_number
+      }
+    })
+    .filter(Boolean)
+}
+
+/** Родитель привязывает ребёнка по номеру карты (RPC link_child) */
+export async function linkChildByCard(cardNumber) {
+  const trimmed = (cardNumber || '').trim()
+  if (!trimmed) throw new Error('Укажите номер карты ребёнка')
+
+  const { data, error } = await supabase.rpc('link_child', { p_card_number: trimmed })
+  if (error) throw new Error(translateDbError(error))
+  return data
+}
+
+/** Причины отсутствия ученика за период (посещаемость дня — урок №1) */
+export async function loadAttendanceReasons({ studentId, from, to }) {
+  return load(
+    supabase
+      .from('attendance')
+      .select('id, attend_date, status, reason')
+      .eq('student_id', studentId)
+      .eq('lesson_number', ABSENCE_LESSON_NUMBER)
+      .gte('attend_date', from)
+      .lte('attend_date', to)
+      .order('attend_date', { ascending: true }),
+    'Не удалось загрузить посещаемость'
+  )
+}
+
+/**
+ * Родитель (или учитель) пишет причину отсутствия на дату.
+ * Пустая причина — убираем текст, статус дня не трогаем («Н» учителя остаётся).
+ */
+export async function saveAbsenceReason({ studentId, classId, date, reason, markedBy }) {
+  const text = (reason || '').trim()
+
+  if (!text) {
+    const { error } = await supabase
+      .from('attendance')
+      .update({ reason: null })
+      .eq('student_id', studentId)
+      .eq('attend_date', date)
+      .eq('lesson_number', ABSENCE_LESSON_NUMBER)
+
+    if (error) throw new Error(`Не удалось очистить причину: ${translateDbError(error)}`)
+    return
+  }
+
+  const { error } = await supabase.from('attendance').upsert(
+    {
+      student_id: studentId,
+      class_id: classId,
+      attend_date: date,
+      lesson_number: ABSENCE_LESSON_NUMBER,
+      status: 'excused',
+      reason: text,
+      marked_by: markedBy || null
+    },
+    { onConflict: 'student_id,attend_date,lesson_number' }
+  )
+
+  if (error) throw new Error(`Не удалось сохранить причину: ${translateDbError(error)}`)
 }
 
 /* ------------------------------------------------------------------ */

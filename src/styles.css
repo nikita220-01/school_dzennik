@@ -500,6 +500,30 @@ code {
   font-size: 14px;
 }
 
+/* Карточка «Дневник» — кнопка: открывает страницу журнала */
+.card--button {
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, transform 0.2s;
+}
+
+.card--button:hover {
+  border-color: var(--primary);
+  background: rgba(99, 102, 241, 0.08);
+  transform: translateY(-2px);
+}
+
+.card--button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Кнопка «← Назад» над страницей журнала */
+.home__back {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 4px;
+}
+
 .card .badge--soon {
   position: absolute;
   right: 14px;
@@ -1152,6 +1176,113 @@ button.mark-cell {
 /* Клетка журнала, по которой можно ставить отметку, — с курсором-рукой */
 button.mark-cell {
   cursor: pointer;
+}
+
+/* ===== Замечания по датам (внизу страницы) ===== */
+
+/* Поля ввода и списки на белом листе: тёмный текст, белый фон */
+.sheet .field__input {
+  background: #ffffff;
+  border: 1px solid #94a3b8;
+  color: #0f172a;
+}
+
+.sheet .field__input::placeholder {
+  color: #94a3b8;
+}
+
+.remarks__title {
+  margin: 16px 16px 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.remarks__form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 0 16px;
+}
+
+.remarks__form .field--compact {
+  min-width: 230px;
+}
+
+.remarks__notice {
+  margin: 0 16px;
+}
+
+.remarks__table .remarks__date {
+  width: 110px;
+  min-width: 110px;
+  white-space: nowrap;
+}
+
+.remarks__table .remarks__text {
+  text-align: left;
+}
+
+.remarks__table .remarks__del {
+  width: 56px;
+  min-width: 56px;
+}
+
+/* ===== Расписание (вкладка «Расписание») ===== */
+.schedule__day {
+  min-width: 150px;
+  text-align: left;
+  font-weight: 700;
+}
+
+.schedule__table td {
+  min-width: 96px;
+}
+
+.schedule__add {
+  width: 56px;
+  min-width: 56px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+/* ===== Домашнее задание (вкладка «Домашнее задание») ===== */
+.homework__table td {
+  min-width: 150px;
+  vertical-align: top;
+}
+
+/* Поле ввода задания в клетке дня: текст и цифры */
+.homework__input {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f172a;
+  font: inherit;
+  font-size: 13px;
+}
+
+.homework__input:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* Чтение (ученик/родитель) — тот же размер, без рамки */
+.homework__text {
+  display: block;
+  min-height: 34px;
+  color: #0f172a;
+  font-size: 13px;
+  text-align: left;
+  white-space: pre-wrap;
+}
+
+.homework__note {
+  margin: 0 16px 14px;
 }
 
 @media (max-width: 560px) {

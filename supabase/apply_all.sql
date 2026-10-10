@@ -1,7 +1,7 @@
 -- =============================================================================
 --  ШКОЛЬНЫЙ ДНЕВНИК — ЗАПУСТИТЬ ВСЁ ОДНИМ ФАЙЛОМ
 --
---  Этот файл склеен из 10 частей (создан автоматически, порядок важен):
+--  Этот файл склеен из 13 частей (создан автоматически, порядок важен):
 --    1) migrations/20260101000000_00_extensions_and_types.sql — расширения и ENUM
 --    2) migrations/20260101000001_01_core_tables.sql — 15 таблиц и индексы
 --    3) migrations/20260101000002_02_functions_and_triggers.sql — функции и триггеры
@@ -10,8 +10,11 @@
 --    6) migrations/20260101000005_05_classes_and_grades_scale.sql — классы 3А…11Г (36 классов) и 10-балльная шкала оценок
 --    7) migrations/20260101000006_06_teacher_can_move_students.sql — учитель может переводить ученика в другой класс
 --    8) migrations/20260101000007_07_belarusian_subjects.sql — предметы «Белорусский язык» и «Белорусская литература»
---    9) seed.sql — демо-данные: школа, 4 четверти, 15 предметов, все классы 3А…11Г
---    10) promote_teacher.sql — роль «учитель» тем, кто регистрировался учителем (или самому новому аккаунту)
+--    9) migrations/20260101000008_08_date_remarks.sql — замечания по датам: дата — замечание — просьба
+--    10) migrations/20260101000009_09_class_schedules.sql — расписание классов: день недели — урок — предмет
+--    11) migrations/20260101000010_10_homework.sql — домашнее задание: класс — предмет — дата — текст
+--    12) seed.sql — демо-данные: школа, 4 четверти, 15 предметов, все классы 3А…11Г
+--    13) promote_teacher.sql — роль «учитель» тем, кто регистрировался учителем (или самому новому аккаунту)
 --                                                                  и назначение ему классов; пока пользователей нет — пишет NOTICE
 --
 --  КАК ЗАПУСКАТЬ
@@ -1872,6 +1875,222 @@ select count(*) as subjects_total from public.subjects;
 select name, short_name from public.subjects order by name;
 
 -- <<<<<<<<<<<<<<<<<<<<<< КОНЕЦ: supabase\migrations\20260101000007_07_belarusian_subjects.sql <<<<<<<<<<<<<<<<<<<<<<
+
+-- >>>>>>>>>>>>>>>>>>>>>> НАЧАЛО: supabase\migrations\20260101000008_08_date_remarks.sql >>>>>>>>>>>>>>>>>>>>>>
+
+-- =============================================================================
+--  08. ЗАМЕЧАНИЯ ПО ДАТАМ (дата — замечание — просьба)
+--
+--  Нижний блок экрана «Отметки»/«Дневник»: учитель фиксирует событие дня
+--  и просьбу, ученики и родители видят список за неделю.
+--  Идемпотентно: повторный запуск безопасен.
+-- =============================================================================
+
+create table if not exists public.date_remarks (
+  id          uuid primary key default gen_random_uuid(),
+  class_id    uuid not null references public.classes (id) on delete cascade,
+  remark_date date not null,
+  remark      text not null default '',
+  request     text not null default '',
+  created_by  uuid default auth.uid() references auth.users (id) on delete set null,
+  created_at  timestamptz not null default now()
+);
+
+comment on table public.date_remarks
+  is 'Замечания по датам: дата — замечание — просьба';
+
+create index if not exists date_remarks_class_date_idx
+  on public.date_remarks (class_id, remark_date);
+
+alter table public.date_remarks enable row level security;
+
+-- Видят все вошедшие (журнал не хранит секретов)
+drop policy if exists date_remarks_select on public.date_remarks;
+create policy date_remarks_select on public.date_remarks
+  for select to authenticated using (true);
+
+-- Добавлять может только учитель/админ (по роли в профиле)
+drop policy if exists date_remarks_insert on public.date_remarks;
+create policy date_remarks_insert on public.date_remarks
+  for insert to authenticated
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('teacher', 'admin')
+    )
+  );
+
+-- Удалять может только учитель/админ (у DELETE разрешён только USING — WITH CHECK запрещён)
+drop policy if exists date_remarks_delete on public.date_remarks;
+create policy date_remarks_delete on public.date_remarks
+  for delete to authenticated
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('teacher', 'admin')
+    )
+  );
+
+-- <<<<<<<<<<<<<<<<<<<<<< КОНЕЦ: supabase\migrations\20260101000008_08_date_remarks.sql <<<<<<<<<<<<<<<<<<<<<<
+
+-- >>>>>>>>>>>>>>>>>>>>>> НАЧАЛО: supabase\migrations\20260101000009_09_class_schedules.sql >>>>>>>>>>>>>>>>>>>>>>
+
+-- =============================================================================
+--  09. РАСПИСАНИЕ КЛАССОВ (день недели — урок — предмет)
+--
+--  Вкладка «Расписание»: учитель заполняет сетку по дням для каждого класса,
+--  ученики и родители видят. Идемпотентно: повторный запуск безопасен.
+-- =============================================================================
+
+create table if not exists public.class_schedules (
+  id            uuid primary key default gen_random_uuid(),
+  class_id      uuid not null references public.classes (id) on delete cascade,
+  weekday       smallint not null check (weekday between 1 and 6),
+  lesson_number smallint not null check (lesson_number between 1 and 12),
+  subject_id    uuid not null references public.subjects (id) on delete cascade,
+  updated_at    timestamptz not null default now(),
+  unique (class_id, weekday, lesson_number)
+);
+
+comment on table public.class_schedules
+  is 'Расписание класса: день недели (1=Пн…6=Сб) — номер урока — предмет';
+
+create index if not exists class_schedules_class_idx
+  on public.class_schedules (class_id);
+
+alter table public.class_schedules enable row level security;
+
+-- Видят все вошедшие
+drop policy if exists class_schedules_select on public.class_schedules;
+create policy class_schedules_select on public.class_schedules
+  for select to authenticated using (true);
+
+-- Заполнять может только учитель/админ
+drop policy if exists class_schedules_insert on public.class_schedules;
+create policy class_schedules_insert on public.class_schedules
+  for insert to authenticated
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('teacher', 'admin')
+    )
+  );
+
+drop policy if exists class_schedules_update on public.class_schedules;
+create policy class_schedules_update on public.class_schedules
+  for update to authenticated
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('teacher', 'admin')
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('teacher', 'admin')
+    )
+  );
+
+-- Убирать предмет может только учитель/админ (у DELETE только USING)
+drop policy if exists class_schedules_delete on public.class_schedules;
+create policy class_schedules_delete on public.class_schedules
+  for delete to authenticated
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('teacher', 'admin')
+    )
+  );
+
+-- <<<<<<<<<<<<<<<<<<<<<< КОНЕЦ: supabase\migrations\20260101000009_09_class_schedules.sql <<<<<<<<<<<<<<<<<<<<<<
+
+-- >>>>>>>>>>>>>>>>>>>>>> НАЧАЛО: supabase\migrations\20260101000010_10_homework.sql >>>>>>>>>>>>>>>>>>>>>>
+
+-- =============================================================================
+--  10. ДОМАШНЕЕ ЗАДАНИЕ ПО ДНЯМ (класс — предмет — дата — текст)
+--
+--  Вкладка «Домашнее задание»: учитель пишет задание в клетку дня,
+--  ученики и родители читают.
+--
+--  ВАЖНО: таблица называется day_homework, а не homework, потому что
+--  таблица public.homework уже занята схемой 01_core_tables
+--  (lesson_id, description, due_date — её читают представления).
+--  Идемпотентно: повторный запуск безопасен.
+-- =============================================================================
+
+create table if not exists public.day_homework (
+  id            uuid primary key default gen_random_uuid(),
+  class_id      uuid not null references public.classes (id) on delete cascade,
+  subject_id    uuid not null references public.subjects (id) on delete cascade,
+  homework_date date not null,
+  text          text not null default '',
+  updated_at    timestamptz not null default now(),
+  unique (class_id, subject_id, homework_date)
+);
+
+comment on table public.day_homework
+  is 'Домашнее задание по дням: класс — предмет — дата — текст';
+
+create index if not exists day_homework_class_subject_date_idx
+  on public.day_homework (class_id, subject_id, homework_date);
+
+alter table public.day_homework enable row level security;
+
+-- Читают все вошедшие
+drop policy if exists day_homework_select on public.day_homework;
+create policy day_homework_select on public.day_homework
+  for select to authenticated using (true);
+
+-- Пишет только учитель/админ
+drop policy if exists day_homework_insert on public.day_homework;
+create policy day_homework_insert on public.day_homework
+  for insert to authenticated
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('teacher', 'admin')
+    )
+  );
+
+drop policy if exists day_homework_update on public.day_homework;
+create policy day_homework_update on public.day_homework
+  for update to authenticated
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('teacher', 'admin')
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('teacher', 'admin')
+    )
+  );
+
+-- Удалять (очищать клетку) может только учитель/админ (у DELETE только USING)
+drop policy if exists day_homework_delete on public.day_homework;
+create policy day_homework_delete on public.day_homework
+  for delete to authenticated
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.role in ('teacher', 'admin')
+    )
+  );
+
+-- <<<<<<<<<<<<<<<<<<<<<< КОНЕЦ: supabase\migrations\20260101000010_10_homework.sql <<<<<<<<<<<<<<<<<<<<<<
 
 -- >>>>>>>>>>>>>>>>>>>>>> НАЧАЛО: supabase\seed.sql >>>>>>>>>>>>>>>>>>>>>>
 

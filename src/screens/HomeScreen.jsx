@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import GradesScreen from './GradesScreen'
+import HomeworkScreen from './HomeworkScreen'
+import ScheduleScreen from './ScheduleScreen'
 
 const ROLE_LABELS = {
   admin: 'Администратор',
@@ -10,9 +12,9 @@ const ROLE_LABELS = {
 }
 
 const SECTIONS = [
-  { title: 'Дневник', emoji: '📔', hint: 'Оценки за неделю' },
-  { title: 'Расписание', emoji: '🗓️', hint: 'Уроки по дням' },
-  { title: 'Домашние задания', emoji: '✏️', hint: 'Что задали' },
+  { title: 'Дневник', emoji: '📔', hint: 'Оценки за неделю', screen: 'grades' },
+  { title: 'Расписание', emoji: '🗓️', hint: 'Уроки по дням', screen: 'schedule' },
+  { title: 'Домашние задания', emoji: '✏️', hint: 'Что задали', screen: 'homework' },
   { title: 'Посещаемость', emoji: '✅', hint: 'Пропуски и причины' }
 ]
 
@@ -109,7 +111,7 @@ export default function HomeScreen() {
     profileError,
     signOut
   } = useAuth()
-  const [tab, setTab] = useState('diary') // 'diary' | 'grades'
+  const [view, setView] = useState('home') // 'home' | 'grades' — открыт ли журнал «Дневника»
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
@@ -170,75 +172,117 @@ export default function HomeScreen() {
         <button
           type="button"
           role="tab"
-          aria-selected={tab === 'diary'}
-          className={`tabs__item ${tab === 'diary' ? 'is-active' : ''}`}
-          onClick={() => setTab('diary')}
+          aria-selected={view === 'home'}
+          className={`tabs__item ${view === 'home' ? 'is-active' : ''}`}
+          onClick={() => setView('home')}
         >
           📔 Дневник
         </button>
         <button
           type="button"
           role="tab"
-          aria-selected={tab === 'grades'}
-          className={`tabs__item ${tab === 'grades' ? 'is-active' : ''}`}
-          onClick={() => setTab('grades')}
+          aria-selected={view === 'grades'}
+          className={`tabs__item ${view === 'grades' ? 'is-active' : ''}`}
+          onClick={() => setView('grades')}
         >
           📝 Отметки
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === 'schedule'}
+          className={`tabs__item ${view === 'schedule' ? 'is-active' : ''}`}
+          onClick={() => setView('schedule')}
+        >
+          🗓️ Расписание
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === 'homework'}
+          className={`tabs__item ${view === 'homework' ? 'is-active' : ''}`}
+          onClick={() => setView('homework')}
+        >
+          ✏️ Домашнее задание
+        </button>
       </nav>
 
-      {tab === 'grades' ? (
+      {view === 'grades' ? (
         <GradesScreen />
+      ) : view === 'schedule' ? (
+        <ScheduleScreen />
+      ) : view === 'homework' ? (
+        <HomeworkScreen />
       ) : (
         <>
           <section className="cards">
-        {SECTIONS.map((section) => (
-          <article className="card" key={section.title}>
-            <span className="card__emoji" aria-hidden="true">
-              {section.emoji}
-            </span>
-            <h2 className="card__title">{section.title}</h2>
-            <p className="card__hint">{section.hint}</p>
-            <span className="badge badge--soon">скоро</span>
-          </article>
-        ))}
-      </section>
+            {SECTIONS.map((section) => (
+              <article
+                className={`card${section.screen ? ' card--button' : ''}`}
+                key={section.title}
+                role={section.screen ? 'button' : undefined}
+                tabIndex={section.screen ? 0 : undefined}
+                onClick={section.screen ? () => setView(section.screen) : undefined}
+                onKeyDown={
+                  section.screen
+                    ? (event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          setView(section.screen)
+                        }
+                      }
+                    : undefined
+                }
+              >
+                <span className="card__emoji" aria-hidden="true">
+                  {section.emoji}
+                </span>
+                <h2 className="card__title">{section.title}</h2>
+                <p className="card__hint">{section.hint}</p>
+                {section.screen ? (
+                  <span className="badge">открыть</span>
+                ) : (
+                  <span className="badge badge--soon">скоро</span>
+                )}
+              </article>
+            ))}
+          </section>
 
-      <section className="panel">
-        <h2 className="panel__title">Профиль</h2>
-        <dl className="kv">
-          <div>
-            <dt>ID пользователя</dt>
-            <dd className="kv__mono">{user?.id}</dd>
-          </div>
-          <div>
-            <dt>Email</dt>
-            <dd>{user?.email}</dd>
-          </div>
-          <div>
-            <dt>Роль</dt>
-            <dd>{profile?.role || role || '—'}</dd>
-          </div>
-          <div>
-            <dt>Класс</dt>
-            <dd>{className || '—'}</dd>
-          </div>
-          {enrollment?.cardNumber ? (
-            <div>
-              <dt>Номер карты ученика</dt>
-              <dd className="kv__mono">{enrollment.cardNumber}</dd>
-            </div>
-          ) : null}
-          <div>
-            <dt>Школа</dt>
-            <dd>{profile?.school_id || '—'}</dd>
-          </div>
-          <div>
-            <dt>Сессия создана</dt>
-            <dd>{user?.created_at ? new Date(user.created_at).toLocaleString('ru-RU') : '—'}</dd>
-          </div>
-        </dl>
-      </section>
+          <section className="panel">
+            <h2 className="panel__title">Профиль</h2>
+            <dl className="kv">
+              <div>
+                <dt>ID пользователя</dt>
+                <dd className="kv__mono">{user?.id}</dd>
+              </div>
+              <div>
+                <dt>Email</dt>
+                <dd>{user?.email}</dd>
+              </div>
+              <div>
+                <dt>Роль</dt>
+                <dd>{profile?.role || role || '—'}</dd>
+              </div>
+              <div>
+                <dt>Класс</dt>
+                <dd>{className || '—'}</dd>
+              </div>
+              {enrollment?.cardNumber ? (
+                <div>
+                  <dt>Номер карты ученика</dt>
+                  <dd className="kv__mono">{enrollment.cardNumber}</dd>
+                </div>
+              ) : null}
+              <div>
+                <dt>Школа</dt>
+                <dd>{profile?.school_id || '—'}</dd>
+              </div>
+              <div>
+                <dt>Сессия создана</dt>
+                <dd>{user?.created_at ? new Date(user.created_at).toLocaleString('ru-RU') : '—'}</dd>
+              </div>
+            </dl>
+          </section>
         </>
       )}
     </div>
