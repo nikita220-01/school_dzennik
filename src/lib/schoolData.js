@@ -434,28 +434,43 @@ export async function clearHomework({ classId, subjectId, date }) {
 
 /** Дети текущего родителя: [{ id, classId, fullName, cardNumber }] */
 export async function loadMyChildren(parentId) {
-  const rows = await load(
-    supabase
-      .from('parent_students')
-      .select(
-        'student_id, students ( id, class_id, card_number, profiles ( full_name ) )'
-      )
-      .eq('parent_id', parentId),
+  // Три простых запроса вместо вложенного embed students→profiles:
+  // в схеме students связан с profiles несколькими путями (profile_id,
+  // а также обратные связи через parent_students/class_subjects/schedule…),
+  // и PostgREST из-за этого падает с ошибкой «more than one relationship».
+  const links = await load(
+    supabase.from('parent_students').select('student_id').eq('parent_id', parentId),
     'Не удалось загрузить детей'
   )
 
-  return rows
-    .map((row) => {
-      const student = row.students
-      if (!student) return null
-      return {
-        id: student.id,
-        classId: student.class_id,
-        fullName: student.profiles?.full_name || 'Ученик',
-        cardNumber: student.card_number
-      }
-    })
-    .filter(Boolean)
+  const studentIds = links.map((row) => row.student_id).filter(Boolean)
+  if (!studentIds.length) return []
+
+  const students = await load(
+    supabase
+      .from('students')
+      .select('id, class_id, card_number, profile_id')
+      .in('id', studentIds),
+    'Не удалось загрузить учеников'
+  )
+  if (!students.length) return []
+
+  const profileIds = [...new Set(students.map((student) => student.profile_id).filter(Boolean))]
+  let nameById = new Map()
+  if (profileIds.length) {
+    const profiles = await load(
+      supabase.from('profiles').select('id, full_name').in('id', profileIds),
+      'Не удалось загрузить имена учеников'
+    )
+    nameById = new Map(profiles.map((profile) => [profile.id, profile.full_name]))
+  }
+
+  return students.map((student) => ({
+    id: student.id,
+    classId: student.class_id,
+    fullName: nameById.get(student.profile_id) || 'Ученик',
+    cardNumber: student.card_number
+  }))
 }
 
 /** Родитель привязывает ребёнка по номеру карты (RPC link_child) */
@@ -466,6 +481,28 @@ export async function linkChildByCard(cardNumber) {
   const { data, error } = await supabase.rpc('link_child', { p_card_number: trimmed })
   if (error) throw new Error(translateDbError(error))
   return data
+}
+
+/**
+ * Родитель привязывает нескольких детей по номерам карт сразу.
+ * Каждый номер обрабатывается отдельно: один «плохой» не срывает остальные.
+ * Возвращает [{ card, ok, error }] — error заполнен только при неудаче.
+ */
+export async function linkChildrenByCards(cardNumbers) {
+  const cards = (cardNumbers || [])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+
+  const results = []
+  for (const card of cards) {
+    try {
+      await linkChildByCard(card)
+      results.push({ card, ok: true, error: null })
+    } catch (error) {
+      results.push({ card, ok: false, error: error.message })
+    }
+  }
+  return results
 }
 
 /** Причины отсутствия ученика за период (посещаемость дня — урок №1) */

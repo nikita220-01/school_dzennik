@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { translateAuthError } from '../lib/authErrors'
-import { joinClass as joinClassByCode, loadMyStudent } from '../lib/schoolData'
+import { joinClass as joinClassByCode, linkChildrenByCards, loadMyStudent } from '../lib/schoolData'
 
 /** Минимальное время показа загрузочного экрана, чтобы он не «мигал» */
 const MIN_BOOT_MS = 1400
@@ -163,8 +163,14 @@ export function AuthProvider({ children }) {
   }, [])
 
   const signUp = useCallback(
-    async ({ email, password, fullName, role, classCode }) => {
+    async ({ email, password, fullName, role, classCode, childCards }) => {
       const trimmedCode = (classCode || '').trim()
+
+      // Несколько номеров карт ребёнка через запятую/пробел/точку с запятой
+      const childCardList = (childCards || '')
+        .split(/[,;\s]+/)
+        .map((value) => value.trim())
+        .filter(Boolean)
 
       const { data, error } = await supabase.auth.signUp({
         email: email.trim(),
@@ -174,7 +180,9 @@ export function AuthProvider({ children }) {
             full_name: fullName.trim(),
             role,
             // Код класса нужен, чтобы ученик сразу попал в список класса
-            invite_code: trimmedCode || null
+            invite_code: trimmedCode || null,
+            // Номера карт детей — на случай, если подтверждение email включено
+            child_cards: childCardList.length ? childCardList : null
           }
         }
       })
@@ -195,7 +203,19 @@ export function AuthProvider({ children }) {
         }
       }
 
-      return { needsEmailConfirm }
+      // Родителя сразу привязываем к детям по номерам карт (RPC link_child).
+      // Если подтверждение email включено, сессии ещё нет — привяжем позже на
+      // вкладке «Посещаемость».
+      let linkChildren = []
+      if (data.session?.user && role === 'parent' && childCardList.length) {
+        try {
+          linkChildren = await linkChildrenByCards(childCardList)
+        } catch (linkError) {
+          return { needsEmailConfirm, linkError: linkError.message }
+        }
+      }
+
+      return { needsEmailConfirm, linkChildren }
     },
     [loadEnrollment]
   )

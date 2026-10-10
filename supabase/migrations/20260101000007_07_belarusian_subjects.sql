@@ -20,12 +20,13 @@ on conflict (school_id, name) do nothing;
 
 -- Учителям — доступ к новым предметам во всех классах (как в promote_teacher.sql)
 insert into public.class_subjects (class_id, subject_id, teacher_id)
-select c.id, s.id, p.id
+select distinct on (c.id, s.id) c.id, s.id, p.id
   from public.profiles p
  cross join public.classes c
  cross join public.subjects s
  where p.role = 'teacher'
    and s.name in ('Белорусский язык', 'Белорусская литература')
+  order by c.id, s.id, p.id
 on conflict (class_id, subject_id) do update
   set teacher_id = excluded.teacher_id;
 

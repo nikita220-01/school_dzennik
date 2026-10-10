@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
+import AttendanceScreen from './AttendanceScreen'
 import GradesScreen from './GradesScreen'
 import HomeworkScreen from './HomeworkScreen'
 import ScheduleScreen from './ScheduleScreen'
@@ -15,7 +16,7 @@ const SECTIONS = [
   { title: 'Дневник', emoji: '📔', hint: 'Оценки за неделю', screen: 'grades' },
   { title: 'Расписание', emoji: '🗓️', hint: 'Уроки по дням', screen: 'schedule' },
   { title: 'Домашние задания', emoji: '✏️', hint: 'Что задали', screen: 'homework' },
-  { title: 'Посещаемость', emoji: '✅', hint: 'Пропуски и причины' }
+  { title: 'Посещаемость', emoji: '✅', hint: 'Пропуски и причины', screen: 'attendance' }
 ]
 
 /**
@@ -111,7 +112,7 @@ export default function HomeScreen() {
     profileError,
     signOut
   } = useAuth()
-  const [view, setView] = useState('home') // 'home' | 'grades' — открыт ли журнал «Дневника»
+  const [view, setView] = useState('home') // 'home' | 'grades' | 'schedule' | 'homework' | 'attendance'
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
@@ -187,24 +188,6 @@ export default function HomeScreen() {
         >
           📝 Отметки
         </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={view === 'schedule'}
-          className={`tabs__item ${view === 'schedule' ? 'is-active' : ''}`}
-          onClick={() => setView('schedule')}
-        >
-          🗓️ Расписание
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={view === 'homework'}
-          className={`tabs__item ${view === 'homework' ? 'is-active' : ''}`}
-          onClick={() => setView('homework')}
-        >
-          ✏️ Домашнее задание
-        </button>
       </nav>
 
       {view === 'grades' ? (
@@ -213,6 +196,8 @@ export default function HomeScreen() {
         <ScheduleScreen />
       ) : view === 'homework' ? (
         <HomeworkScreen />
+      ) : view === 'attendance' ? (
+        <AttendanceScreen />
       ) : (
         <>
           <section className="cards">

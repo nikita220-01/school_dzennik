@@ -1,7 +1,7 @@
 -- =============================================================================
 --  ШКОЛЬНЫЙ ДНЕВНИК — ЗАПУСТИТЬ ВСЁ ОДНИМ ФАЙЛОМ
 --
---  Этот файл склеен из 13 частей (создан автоматически, порядок важен):
+--  Этот файл склеен из 15 частей (создан автоматически, порядок важен):
 --    1) migrations/20260101000000_00_extensions_and_types.sql — расширения и ENUM
 --    2) migrations/20260101000001_01_core_tables.sql — 15 таблиц и индексы
 --    3) migrations/20260101000002_02_functions_and_triggers.sql — функции и триггеры
@@ -13,8 +13,10 @@
 --    9) migrations/20260101000008_08_date_remarks.sql — замечания по датам: дата — замечание — просьба
 --    10) migrations/20260101000009_09_class_schedules.sql — расписание классов: день недели — урок — предмет
 --    11) migrations/20260101000010_10_homework.sql — домашнее задание: класс — предмет — дата — текст
---    12) seed.sql — демо-данные: школа, 4 четверти, 15 предметов, все классы 3А…11Г
---    13) promote_teacher.sql — роль «учитель» тем, кто регистрировался учителем (или самому новому аккаунту)
+--    12) migrations/20260101000011_11_parent_attendance.sql — посещаемость: родитель указанной причины отсутствия ребёнка
+--    13) migrations/20260101000012_12_attendance_reason_parent_only.sql — посещаемость: причину и статус excused меняет только родитель или админ
+--    14) seed.sql — демо-данные: школа, 4 четверти, 15 предметов, все классы 3А…11Г
+--    15) promote_teacher.sql — роль «учитель» тем, кто регистрировался учителем (или самому новому аккаунту)
 --                                                                  и назначение ему классов; пока пользователей нет — пишет NOTICE
 --
 --  КАК ЗАПУСКАТЬ
@@ -1009,12 +1011,26 @@ begin
       coalesce(v_role::text, 'нет');
   end if;
 
+  -- Сначала ищем по номеру карты (выдаётся автоматически при зачислении в класс)
   select s.id into v_student_id
   from public.students s
-  where s.card_number = trim(p_card_number);
+  where s.card_number = btrim(p_card_number);
+
+  -- Если по номеру карты не нашли — пробуем как ID ученика (students.id или id
+  -- его профиля). Позволяет привязать ребёнка, даже если номер карты неизвестен.
+  if v_student_id is null then
+    begin
+      select s.id into v_student_id
+      from public.students s
+      where s.id = btrim(p_card_number)::uuid
+         or s.profile_id = btrim(p_card_number)::uuid;
+    exception when others then
+      v_student_id := null; -- передано не UUID и не номер карты
+    end;
+  end if;
 
   if v_student_id is null then
-    raise exception 'Ученик с номером карты % не найден', p_card_number;
+    raise exception 'Ученик не найден. Проверьте номер карты или ID ученика и попробуйте снова.';
   end if;
 
   insert into public.parent_students (parent_id, student_id)
@@ -1026,7 +1042,7 @@ end
 $fn$;
 
 comment on function public.link_child(text) is
-  'RPC: привязывает ребёнка к текущему родителю по students.card_number';
+  'RPC: привязывает ребёнка к текущему родителю по номеру карты (students.card_number) или по ID ученика';
 
 create or replace function public.unlink_child(p_student_id uuid)
 returns void
@@ -1860,12 +1876,13 @@ on conflict (school_id, name) do nothing;
 
 -- Учителям — доступ к новым предметам во всех классах (как в promote_teacher.sql)
 insert into public.class_subjects (class_id, subject_id, teacher_id)
-select c.id, s.id, p.id
+select distinct on (c.id, s.id) c.id, s.id, p.id
   from public.profiles p
  cross join public.classes c
  cross join public.subjects s
  where p.role = 'teacher'
    and s.name in ('Белорусский язык', 'Белорусская литература')
+  order by c.id, s.id, p.id
 on conflict (class_id, subject_id) do update
   set teacher_id = excluded.teacher_id;
 
@@ -2092,6 +2109,111 @@ create policy day_homework_delete on public.day_homework
 
 -- <<<<<<<<<<<<<<<<<<<<<< КОНЕЦ: supabase\migrations\20260101000010_10_homework.sql <<<<<<<<<<<<<<<<<<<<<<
 
+-- >>>>>>>>>>>>>>>>>>>>>> НАЧАЛО: supabase\migrations\20260101000011_11_parent_attendance.sql >>>>>>>>>>>>>>>>>>>>>>
+
+-- =============================================================================
+--  11. ПОСЕЩАЕМОСТЬ: ПРИЧИНЫ ОТСУТСТВИЯ ОТ РОДИТЕЛЯ
+--
+--  Вкладка «Посещаемость»: родитель привязанного ребёнка (parent_students)
+--  указывает причину его отсутствия. Раньше attendance могли менять только
+--  учитель класса и админ — расширяем на родителей.
+--  Идемпотентно: повторный запуск безопасен.
+-- =============================================================================
+
+drop policy if exists attendance_insert on public.attendance;
+create policy attendance_insert on public.attendance
+  for insert to authenticated
+  with check (
+    public.is_admin()
+    or public.teaches_class(class_id)
+    or exists (
+      select 1 from public.parent_students ps
+      where ps.parent_id = auth.uid()
+        and ps.student_id = attendance.student_id
+    )
+  );
+
+drop policy if exists attendance_update on public.attendance;
+create policy attendance_update on public.attendance
+  for update to authenticated
+  using (
+    public.is_admin()
+    or public.teaches_class(class_id)
+    or exists (
+      select 1 from public.parent_students ps
+      where ps.parent_id = auth.uid()
+        and ps.student_id = attendance.student_id
+    )
+  )
+  with check (
+    public.is_admin()
+    or public.teaches_class(class_id)
+    or exists (
+      select 1 from public.parent_students ps
+      where ps.parent_id = auth.uid()
+        and ps.student_id = attendance.student_id
+    )
+  );
+
+-- <<<<<<<<<<<<<<<<<<<<<< КОНЕЦ: supabase\migrations\20260101000011_11_parent_attendance.sql <<<<<<<<<<<<<<<<<<<<<<
+
+-- >>>>>>>>>>>>>>>>>>>>>> НАЧАЛО: supabase\migrations\20260101000012_12_attendance_reason_parent_only.sql >>>>>>>>>>>>>>>>>>>>>>
+
+-- =============================================================================
+--  12. ПОСЕЩАЕМОСТЬ: ПРИЧИНУ ОТСУТСТВИЯ МЕНЯЕТ ТОЛЬКО РОДИТЕЛЬ ИЛИ АДМИН
+--
+--  Вкладка «Посещаемость»: причины отсутствия заполняют родители, учитель и
+--  администрация могут только просматривать их. При этом таблица attendance
+--  общая — учитель ставит «Н» в журнале «Отметки» через ту же таблицу
+--  (status='absent'), поэтому Row-Level Security (уровень строк) тут не поможет.
+--
+--  Ограничение делаем на уровне столбцов через BEFORE-триггер:
+--    * админ (is_admin) и родитель ребёнка (owns_student) — без ограничений;
+--    * учителю (и всем прочим ролям) можно ставить/менять status
+--      (present / absent / late — например «Н»), но НЕЛЬЗЯ:
+--        – заполнять или менять столбец reason,
+--        – выставлять уважительный статус status = 'excused'.
+--
+--  service_role и seed (auth.uid() is null) триггер пропускает без проверок.
+--  Идемпотентно: повторный запуск безопасен (create or replace / drop if exists).
+-- =============================================================================
+
+create or replace function public.guard_attendance_reason()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  -- Серверная вставка (service_role / seed), админ и родитель ребёнка — без ограничений
+  if auth.uid() is null
+     or public.is_admin()
+     or public.owns_student(new.student_id) then
+    return new;
+  end if;
+
+  -- Учителю (и прочим) нельзя указывать причину и ставить «уважительный» статус
+  if new.status = 'excused'
+     or (tg_op = 'UPDATE' and new.reason is distinct from old.reason)
+     or (tg_op = 'INSERT' and new.reason is not null) then
+    raise exception 'Причину отсутствия может указать только родитель ребёнка или администрация'
+      using errcode = '42501';
+  end if;
+
+  return new;
+end;
+$$;
+
+comment on function public.guard_attendance_reason() is
+  'Посещаемость: причину (reason) и статус excused меняет только админ или родитель ребёнка; учитель ставит только absent/present/late';
+
+drop trigger if exists attendance_guard_reason on public.attendance;
+create trigger attendance_guard_reason
+  before insert or update on public.attendance
+  for each row execute function public.guard_attendance_reason();
+
+-- <<<<<<<<<<<<<<<<<<<<<< КОНЕЦ: supabase\migrations\20260101000012_12_attendance_reason_parent_only.sql <<<<<<<<<<<<<<<<<<<<<<
+
 -- >>>>>>>>>>>>>>>>>>>>>> НАЧАЛО: supabase\seed.sql >>>>>>>>>>>>>>>>>>>>>>
 
 -- =============================================================================
@@ -2283,11 +2405,12 @@ returning u.email, u.raw_user_meta_data ->> 'role' as meta_role;
 --  Только один предмет? Добавьте: and s.name = 'Алгебра'
 -- -----------------------------------------------------------------------------
 insert into public.class_subjects (class_id, subject_id, teacher_id)
-select c.id, s.id, p.id
+select distinct on (c.id, s.id) c.id, s.id, p.id
   from public.profiles p
  cross join public.classes c
  cross join public.subjects s
  where p.role = 'teacher'
+  order by c.id, s.id, p.id
 on conflict (class_id, subject_id) do update
   set teacher_id = excluded.teacher_id;
 

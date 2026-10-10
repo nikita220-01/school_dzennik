@@ -115,11 +115,12 @@ returning u.email, u.raw_user_meta_data ->> 'role' as meta_role;
 --  Только один предмет? Добавьте: and s.name = 'Алгебра'
 -- -----------------------------------------------------------------------------
 insert into public.class_subjects (class_id, subject_id, teacher_id)
-select c.id, s.id, p.id
+select distinct on (c.id, s.id) c.id, s.id, p.id
   from public.profiles p
  cross join public.classes c
  cross join public.subjects s
  where p.role = 'teacher'
+  order by c.id, s.id, p.id
 on conflict (class_id, subject_id) do update
   set teacher_id = excluded.teacher_id;
 

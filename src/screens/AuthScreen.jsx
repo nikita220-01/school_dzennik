@@ -19,7 +19,9 @@ export default function AuthScreen() {
     passwordRepeat: '',
     role: 'student',
     /** Код класса для ученика (invite_code из таблицы classes, например 7A2025) */
-    classCode: ''
+    classCode: '',
+    /** Номер(а) карты ребёнка для родителя — можно несколько через запятую */
+    childCards: ''
   })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -63,21 +65,26 @@ export default function AuthScreen() {
       throw new Error('В коде класса не должно быть пробелов, например 7A2025')
     }
 
-    const { needsEmailConfirm, joinError } = await signUp({
+    const { needsEmailConfirm, joinError, linkChildren, linkError } = await signUp({
       email: form.email,
       password: form.password,
       fullName: form.fullName,
       role: form.role,
-      classCode: form.classCode
+      classCode: form.classCode,
+      childCards: form.childCards
     })
 
     if (needsEmailConfirm) {
       const code = form.classCode.trim()
+      const parentHint =
+        form.role === 'parent'
+          ? ' Ребёнка привяжите позже на вкладке «Посещаемость» по номеру карты.'
+          : ''
       setNotice(
         form.role === 'student' && code
           ? `Аккаунт создан. Мы отправили письмо на ${form.email.trim()} — перейдите по ссылке в письме и войдите. ` +
             `Код класса (${code.toUpperCase()}) введите ещё раз на главной странице, в блоке «Присоединиться к классу».`
-          : `Аккаунт создан. Мы отправили письмо на ${form.email.trim()} — перейдите по ссылке в письме, затем войдите.`
+          : `Аккаунт создан. Мы отправили письмо на ${form.email.trim()} — перейдите по ссылке в письме, затем войдите.${parentHint}`
       )
       setMode('login')
       setForm((prev) => ({ ...prev, password: '', passwordRepeat: '' }))
@@ -88,6 +95,33 @@ export default function AuthScreen() {
     // присоединиться можно будет из дневника.
     if (joinError) {
       setNotice(`Аккаунт создан. В класс добавить не удалось: ${joinError}`)
+      return
+    }
+
+    if (linkError) {
+      setNotice(`Аккаунт создан. Привязать ребёнка не удалось: ${linkError}`)
+      return
+    }
+
+    // Отчёт по привязке детей (какой номер привязался, какой — нет)
+    if (form.role === 'parent' && linkChildren?.length) {
+      const linked = linkChildren.filter((item) => item.ok).map((item) => item.card)
+      const failed = linkChildren.filter((item) => !item.ok)
+      if (linked.length && !failed.length) {
+        setNotice(`Аккаунт создан. Привязали ребёнка (карта): ${linked.join(', ')}.`)
+      } else if (linked.length && failed.length) {
+        setNotice(
+          `Аккаунт создан. Привязали: ${linked.join(', ')}. ` +
+            `Не удалось привязать: ${failed.map((item) => `${item.card} (${item.error})`).join('; ')}. ` +
+            'Можно повторить на вкладке «Посещаемость».'
+        )
+      } else {
+        setNotice(
+          `Аккаунт создан. Привязать не удалось: ${failed
+            .map((item) => `${item.card} (${item.error})`)
+            .join('; ')}. Попробуйте ещё раз на вкладке «Посещаемость».`
+        )
+      }
     }
   }
 
@@ -257,9 +291,22 @@ export default function AuthScreen() {
               ) : null}
 
               {form.role === 'parent' ? (
-                <p className="field__note">
-                  Ребёнка родитель привязывает по номеру карты — эта возможность появится позже.
-                </p>
+                <label className="field">
+                  <span className="field__label">Номер карты или ID ребёнка</span>
+                  <input
+                    className="field__input"
+                    type="text"
+                    placeholder="Например 100000"
+                    value={form.childCards}
+                    onChange={update('childCards')}
+                    disabled={busy}
+                  />
+                  <span className="field__note">
+                    Номер карты ребёнка выдаёт классный руководитель. Если детей несколько —
+                    укажите номера через запятую (например 100000, 100123). Можно ввести позже
+                    на вкладке «Посещаемость».
+                  </span>
+                </label>
               ) : null}
             </>
           )}

@@ -600,12 +600,26 @@ begin
       coalesce(v_role::text, 'нет');
   end if;
 
+  -- Сначала ищем по номеру карты (выдаётся автоматически при зачислении в класс)
   select s.id into v_student_id
   from public.students s
-  where s.card_number = trim(p_card_number);
+  where s.card_number = btrim(p_card_number);
+
+  -- Если по номеру карты не нашли — пробуем как ID ученика (students.id или id
+  -- его профиля). Позволяет привязать ребёнка, даже если номер карты неизвестен.
+  if v_student_id is null then
+    begin
+      select s.id into v_student_id
+      from public.students s
+      where s.id = btrim(p_card_number)::uuid
+         or s.profile_id = btrim(p_card_number)::uuid;
+    exception when others then
+      v_student_id := null; -- передано не UUID и не номер карты
+    end;
+  end if;
 
   if v_student_id is null then
-    raise exception 'Ученик с номером карты % не найден', p_card_number;
+    raise exception 'Ученик не найден. Проверьте номер карты или ID ученика и попробуйте снова.';
   end if;
 
   insert into public.parent_students (parent_id, student_id)
@@ -617,7 +631,7 @@ end
 $fn$;
 
 comment on function public.link_child(text) is
-  'RPC: привязывает ребёнка к текущему родителю по students.card_number';
+  'RPC: привязывает ребёнка к текущему родителю по номеру карты (students.card_number) или по ID ученика';
 
 create or replace function public.unlink_child(p_student_id uuid)
 returns void

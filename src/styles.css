@@ -718,13 +718,17 @@ code {
   gap: 12px;
 }
 
-/* Заголовок экрана — над «листом», как в журнале дежурств */
+/* Заголовок «Посещаемость» — тёмная акцентная шапка на белом «листе» */
 .grades__heading {
   margin: 0;
+  padding: 16px;
   text-align: center;
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  color: #0b1220;
+  background: #eef2ff;
+  border-bottom: 2px solid #6366f1;
 }
 
 /* Компактная строка управления внутри «листа» — над таблицей */
@@ -778,6 +782,17 @@ code {
 
 .grades__legend {
   margin-left: auto;
+}
+
+/* Бейджи среднего балла на белом «листе»: тёмный текст, чтобы было видно */
+.grades__legend .badge {
+  color: #0b1220;
+  background: #e8eefb;
+  border: 1px solid #b9c6e6;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 /* Таблица-журнал: тонкие серые линии сетки и тёмная кромка — как в журнале дежурств */
